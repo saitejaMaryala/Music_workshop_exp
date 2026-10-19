@@ -44,6 +44,7 @@ export type Intake = {
   branch: string;
   currentYear: string;
   musicTraining: string;
+  usualBedTime: string;
   sleepLatencyMinutes: number;
   sleepQuality: number;
   sleepListening: string;
@@ -75,6 +76,9 @@ export function parseIntake(raw: unknown): Intake | null {
     !oneOf(r.raagaEffect, RAAGA_EFFECT)
   ) return null;
 
+  // Usual time of going to sleep: "HH:MM", 24-hour.
+  if (typeof r.usualBedTime !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(r.usualBedTime)) return null;
+
   // Minutes to fall asleep: whole number 0–300.
   const latencyText = typeof r.sleepLatencyMinutes === "string" ? r.sleepLatencyMinutes.trim() : "";
   if (!/^\d{1,3}$/.test(latencyText) || Number(latencyText) > 300) return null;
@@ -97,6 +101,7 @@ export function parseIntake(raw: unknown): Intake | null {
     branch,
     currentYear: r.currentYear as string,
     musicTraining: r.musicTraining as string,
+    usualBedTime: r.usualBedTime,
     sleepLatencyMinutes: Number(latencyText),
     sleepQuality: Number(r.sleepQuality),
     sleepListening: r.sleepListening as string,

@@ -26,6 +26,26 @@ const durations = {
   "condition-b": readDurationSeconds("DURATION_CONDITION_B", 180),
 } as const;
 
+type ConditionId = keyof typeof durations;
+
+async function countSessions(conditionId: ConditionId): Promise<number | null> {
+  const { count, error } = await admin
+    .from("study_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("condition_id", conditionId);
+  if (error || count === null) {
+    logError(`start-session: could not count ${conditionId} sessions:`, error?.message ?? "no count");
+    return null;
+  }
+  return count;
+}
+
+async function pickCondition(): Promise<ConditionId> {
+  const [a, b] = await Promise.all([countSessions("condition-a"), countSessions("condition-b")]);
+  if (a !== null && b !== null && a !== b) return a < b ? "condition-a" : "condition-b";
+  return Math.random() < 0.5 ? "condition-a" : "condition-b";
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -100,8 +120,9 @@ Deno.serve(async (request) => {
     return json({ error: "Could not start your session. Please try again." }, 500);
   }
 
-  // Randomly assign condition server-side.
-  const conditionId: keyof typeof durations = Math.random() < 0.5 ? "condition-a" : "condition-b";
+  // Assign the condition server-side, keeping the groups balanced: the condition with fewer
+  // sessions so far wins; a tie (or a failed count) is a coin flip.
+  const conditionId = await pickCondition();
   const deviceToken = `${crypto.randomUUID()}${crypto.randomUUID()}`;
   const { data: session, error: sessionError } = await admin
     .from("study_sessions")

@@ -899,6 +899,14 @@ export function StudyApp() {
           <section className="intake-section">
             <h2>B · Your sleep</h2>
             <label className="intake-question intake-text">
+              What time do you usually go to sleep?
+              <input
+                onChange={(e) => updateIntake({ usualBedTime: e.target.value })}
+                type="time"
+                value={intake.usualBedTime}
+              />
+            </label>
+            <label className="intake-question intake-text">
               On a usual night, how many minutes does it take you to fall asleep?
               <input
                 inputMode="numeric"

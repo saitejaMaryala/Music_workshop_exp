@@ -40,7 +40,7 @@ h1 { max-width:700px; margin:14px 0 16px; font-family:"DM Sans",Arial,sans-serif
 .survey-pair { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:0 20px; }
 .unit-row { display:flex; flex-wrap:wrap; gap:12px; }
 .unit-input { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; font-weight:400; }
-.intake-text .unit-input input, .unit-input input { width:110px; max-width:110px; }
+.unit-input input { width:110px; max-width:110px; border:1px solid #cbd5d3; border-radius:8px; background:rgba(255,255,255,.72); color:var(--ink); padding:12px; font-weight:400; }
 @media (max-width:600px) { .survey-pair { grid-template-columns:1fr; } }
 .intake-range { width:100%; accent-color:var(--blue-deep); }
 @media (max-width:600px) { .rank-row { flex-direction:column; align-items:flex-start; gap:6px; } }

@@ -65,6 +65,7 @@ export type Intake = {
   branch: string;
   currentYear: string;
   musicTraining: string;
+  usualBedTime: string; // usual time of going to sleep, "HH:MM" (24-hour)
   sleepLatencyMinutes: string; // minutes to fall asleep on a usual night, whole number 0–300
   sleepQuality: string; // last month, 1 (very bad) – 5 (very good)
   sleepListening: string;
@@ -82,6 +83,7 @@ export const initialIntake: Intake = {
   branch: "",
   currentYear: "",
   musicTraining: "",
+  usualBedTime: "",
   sleepLatencyMinutes: "",
   sleepQuality: "",
   sleepListening: "",
@@ -104,6 +106,7 @@ export function isIntakeComplete(i: Intake) {
     i.branch.trim() !== "" &&
     i.currentYear !== "" &&
     i.musicTraining !== "" &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(i.usualBedTime ?? "") &&
     isValidSleepLatency(i.sleepLatencyMinutes) &&
     !!i.sleepQuality &&
     i.sleepListening !== "" &&
