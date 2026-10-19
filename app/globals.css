@@ -38,6 +38,8 @@ h1 { max-width:700px; margin:14px 0 16px; font-family:"DM Sans",Arial,sans-serif
 .survey-part h2 { margin:0 0 22px; font-size:18px; font-weight:600; letter-spacing:-.01em; }
 .survey-part .intake-question:last-child { margin-bottom:0; }
 .survey-pair { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:0 20px; }
+.time-select { display:flex; flex-wrap:wrap; align-items:center; gap:8px; color:var(--muted); }
+.time-select select { min-width:84px; border:1px solid #cbd5d3; border-radius:8px; background:rgba(255,255,255,.72); color:var(--ink); padding:12px 10px; font-size:14px; }
 .unit-row { display:flex; flex-wrap:wrap; gap:12px; }
 .unit-input { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; font-weight:400; }
 .unit-input input { width:110px; max-width:110px; border:1px solid #cbd5d3; border-radius:8px; background:rgba(255,255,255,.72); color:var(--ink); padding:12px; font-weight:400; }

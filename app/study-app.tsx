@@ -173,6 +173,65 @@ function ScaleQuestion({
   );
 }
 
+// Time as three dropdowns (hour, minute, AM/PM) instead of the browser's own time picker,
+// so it looks the same everywhere. Reports "HH:MM" (24-hour) once all three are chosen, else "".
+const HOURS = ["12", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11"];
+const MINUTES = ["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"];
+
+function TimeQuestion({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [parts, setParts] = useState(() => {
+    const match = /^(\d{2}):(\d{2})$/.exec(value);
+    if (!match) return { hour: "", minute: "", period: "" };
+    const h = Number(match[1]);
+    return {
+      hour: String(h % 12 === 0 ? 12 : h % 12).padStart(2, "0"),
+      minute: match[2],
+      period: h < 12 ? "AM" : "PM",
+    };
+  });
+
+  function update(patch: Partial<typeof parts>) {
+    const next = { ...parts, ...patch };
+    setParts(next);
+    if (!next.hour || !next.minute || !next.period) {
+      onChange("");
+      return;
+    }
+    const h = (Number(next.hour) % 12) + (next.period === "PM" ? 12 : 0);
+    onChange(`${String(h).padStart(2, "0")}:${next.minute}`);
+  }
+
+  return (
+    <fieldset className="intake-question">
+      <legend>{label}</legend>
+      <div className="time-select">
+        <select aria-label={`${label} — hour`} onChange={(e) => update({ hour: e.target.value })} value={parts.hour}>
+          <option value="" disabled>Hour</option>
+          {HOURS.map((h) => <option key={h} value={h}>{h}</option>)}
+        </select>
+        <span aria-hidden="true">:</span>
+        <select aria-label={`${label} — minute`} onChange={(e) => update({ minute: e.target.value })} value={parts.minute}>
+          <option value="" disabled>Min</option>
+          {MINUTES.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select aria-label={`${label} — AM or PM`} onChange={(e) => update({ period: e.target.value })} value={parts.period}>
+          <option value="" disabled>AM/PM</option>
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </div>
+    </fieldset>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Intake question sub-components
 // ---------------------------------------------------------------------------
@@ -898,14 +957,11 @@ export function StudyApp() {
 
           <section className="intake-section">
             <h2>B · Your sleep</h2>
-            <label className="intake-question intake-text">
-              What time do you usually go to sleep?
-              <input
-                onChange={(e) => updateIntake({ usualBedTime: e.target.value })}
-                type="time"
-                value={intake.usualBedTime}
-              />
-            </label>
+            <TimeQuestion
+              label="What time do you usually go to sleep?"
+              value={intake.usualBedTime}
+              onChange={(v) => updateIntake({ usualBedTime: v })}
+            />
             <label className="intake-question intake-text">
               On a usual night, how many minutes does it take you to fall asleep?
               <input
@@ -1165,14 +1221,16 @@ export function StudyApp() {
             <section className="form-card survey-part">
               <h2>1 · Your night</h2>
               <div className="survey-pair">
-                <label className="intake-question intake-text">
-                  What time did you get into bed and try to sleep?
-                  <input onChange={(e) => updateSurvey({ bedTime: e.target.value })} type="time" value={survey.bedTime} />
-                </label>
-                <label className="intake-question intake-text">
-                  What time did you wake up for the day?
-                  <input onChange={(e) => updateSurvey({ wakeTime: e.target.value })} type="time" value={survey.wakeTime} />
-                </label>
+                <TimeQuestion
+                  label="What time did you get into bed and try to sleep?"
+                  value={survey.bedTime}
+                  onChange={(v) => updateSurvey({ bedTime: v })}
+                />
+                <TimeQuestion
+                  label="What time did you wake up for the day?"
+                  value={survey.wakeTime}
+                  onChange={(v) => updateSurvey({ wakeTime: v })}
+                />
               </div>
               <label className="intake-question intake-text">
                 Roughly how many minutes did it take you to fall asleep?
