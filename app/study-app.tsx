@@ -1,6 +1,32 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import {
+  AGE_GROUPS,
+  CLASSICAL_FAMILIARITY,
+  CURRENT_YEARS,
+  GENRES,
+  Intake,
+  MUSIC_HELPS_SLEEP,
+  MUSIC_TRAINING,
+  RAAGA_EFFECT,
+  RANK_STYLES,
+  SLEEP_LISTENING,
+  initialIntake,
+  isIntakeComplete,
+  isValidSleepLatency,
+} from "./intake";
+import {
+  MAX_TEXT_CHARACTERS,
+  MorningSurvey,
+  NIGHT_FACTORS,
+  VOLUME,
+  YES_NO,
+  YES_NO_UNSURE,
+  initialMorningSurvey,
+  isMorningSurveyComplete,
+  toggleFactor,
+} from "./morning-survey";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -8,7 +34,8 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 type Screen =
   | "loading"       // checking localStorage for a returning device token
-  | "welcome"       // registration form
+  | "welcome"       // study intro + consent
+  | "details"       // registration form
   | "listen"        // audio player
   | "waiting"       // post-qualification, pre-email
   | "survey"        // reflection form (after magic link or device return)
@@ -22,9 +49,6 @@ type ParticipantState = {
   durationSeconds: number;
 };
 
-type Ratings = Record<"relaxed" | "sleepy" | "alert" | "pleasant", number | null>;
-
-const initialRatings: Ratings = { relaxed: null, sleepy: null, alert: null, pleasant: null };
 
 // ---------------------------------------------------------------------------
 // Config — audio files must be uploaded to Supabase Storage.
@@ -38,6 +62,11 @@ const CONDITION_METADATA: Record<string, { filename: string; loopStartFraction: 
   "condition-a": { filename: "wholetones.mpeg", loopStartFraction: 27 / 46 },
   "condition-b": { filename: "Nilambari.mpeg", loopStartFraction: 31 / 52 },
 };
+
+// Fraction of the track a participant must hear before the loop phase starts.
+// Defaults to 0.9; set NEXT_PUBLIC_LISTEN_THRESHOLD (e.g. 0.05) only for local testing.
+// Must match the LISTEN_THRESHOLD secret of the qualify-session Edge Function.
+const LISTEN_THRESHOLD = Number(process.env.NEXT_PUBLIC_LISTEN_THRESHOLD) || 0.9;
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -100,42 +129,144 @@ function clearDeviceToken() {
 }
 
 // ---------------------------------------------------------------------------
-// Rating sub-component
+// Scale question sub-component
 // ---------------------------------------------------------------------------
 
-function Rating({
+// 1–5 scale with words under the two ends.
+function ScaleQuestion({
   label,
-  value,
-  onChange,
   left,
   right,
+  value,
+  onChange,
 }: {
   label: string;
-  value: number | null;
-  onChange: (v: number) => void;
   left: string;
   right: string;
+  value: number | null;
+  onChange: (v: number) => void;
 }) {
   return (
-    <fieldset className="rating-field">
+    <fieldset className="intake-question">
       <legend>{label}</legend>
-      <div className="rating-scale" role="radiogroup" aria-label={label}>
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-          <button
-            aria-checked={value === n}
-            className={value === n ? "rating selected" : "rating"}
-            key={n}
-            onClick={() => onChange(n)}
-            role="radio"
-            type="button"
-          >
-            {n}
-          </button>
-        ))}
+      <div className="sleep-quality">
+        <div className="rank-buttons" role="radiogroup" aria-label={label}>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              aria-checked={value === n}
+              className={value === n ? "rating selected" : "rating"}
+              key={n}
+              onClick={() => onChange(n)}
+              role="radio"
+              type="button"
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="rating-labels" aria-hidden="true">
+          <span>{left}</span>
+          <span>{right}</span>
+        </div>
       </div>
-      <div className="rating-labels" aria-hidden="true">
-        <span>{left}</span>
-        <span>{right}</span>
+    </fieldset>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Intake question sub-components
+// ---------------------------------------------------------------------------
+
+// Pill-button question. Pass `multiple` for select-all-that-apply.
+function ChoiceQuestion({
+  label,
+  hint,
+  options,
+  selected,
+  onToggle,
+  multiple = false,
+}: {
+  label: string;
+  hint?: string;
+  options: string[];
+  selected: string[];
+  onToggle: (option: string) => void;
+  multiple?: boolean;
+}) {
+  return (
+    <fieldset className="intake-question">
+      <legend>{label}</legend>
+      {hint && <p className="intake-hint">{hint}</p>}
+      <div className="choice-row" role={multiple ? "group" : "radiogroup"} aria-label={label}>
+        {options.map((option) => {
+          const isSelected = selected.includes(option);
+          return (
+            <button
+              aria-checked={isSelected}
+              className={isSelected ? "choice selected" : "choice"}
+              key={option}
+              onClick={() => onToggle(option)}
+              role={multiple ? "checkbox" : "radio"}
+              type="button"
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+// Assign ranks 1–5 to each style without repeats. Picking a rank another style
+// already holds takes it from that style.
+function RankQuestion({
+  label,
+  hint,
+  items,
+  ranking,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  items: string[];
+  ranking: Record<string, number>;
+  onChange: (ranking: Record<string, number>) => void;
+}) {
+  function pick(item: string, rank: number) {
+    const next: Record<string, number> = {};
+    for (const [k, v] of Object.entries(ranking)) if (v !== rank && k !== item) next[k] = v;
+    next[item] = rank;
+    onChange(next);
+  }
+  return (
+    <fieldset className="intake-question">
+      <legend>{label}</legend>
+      <p className="intake-hint">{hint}</p>
+      <div className="rank-list">
+        {items.map((item) => (
+          <div className="rank-row" key={item}>
+            <span>{item}</span>
+            <div className="rank-buttons" role="radiogroup" aria-label={`Rank for ${item}`}>
+              {items.map((_, idx) => {
+                const rank = idx + 1;
+                const isSelected = ranking[item] === rank;
+                return (
+                  <button
+                    aria-checked={isSelected}
+                    className={isSelected ? "rating selected" : "rating"}
+                    key={rank}
+                    onClick={() => pick(item, rank)}
+                    role="radio"
+                    type="button"
+                  >
+                    {rank}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </fieldset>
   );
@@ -154,6 +285,8 @@ export function StudyApp() {
   const [rollNumber, setRollNumber] = useState("");
   const [workshop, setWorkshop] = useState<"yes" | "no" | "">("");
   const [consented, setConsented] = useState(false);
+  const [intake, setIntake] = useState<Intake>(initialIntake);
+  const updateIntake = (patch: Partial<Intake>) => setIntake((prev) => ({ ...prev, ...patch }));
 
   // Session state
   const [participant, setParticipant] = useState<ParticipantState | null>(null);
@@ -168,10 +301,8 @@ export function StudyApp() {
   const [audioError, setAudioError] = useState<string | null>(null);
 
   // Survey state
-  const [ratings, setRatings] = useState<Ratings>(initialRatings);
-  const [surveyWorkshop, setSurveyWorkshop] = useState("");
-  const [headphones, setHeadphones] = useState("");
-  const [notes, setNotes] = useState("");
+  const [survey, setSurvey] = useState<MorningSurvey>(initialMorningSurvey);
+  const updateSurvey = (patch: Partial<MorningSurvey>) => setSurvey((prev) => ({ ...prev, ...patch }));
   const [surveyAccessToken, setSurveyAccessToken] = useState<string | null>(null);
   const [surveyParticipantId, setSurveyParticipantId] = useState<string | null>(null);
 
@@ -194,13 +325,15 @@ export function StudyApp() {
     }
   }, []);
 
-  const allRatingsComplete = Object.values(ratings).every((r) => r !== null) && surveyWorkshop !== "" && headphones !== "";
+  const allRatingsComplete = isMorningSurveyComplete(survey);
 
   const conditionMeta = participant ? CONDITION_METADATA[participant.conditionId] : null;
   const duration = participant?.durationSeconds ?? 0;
-  const requiredPoint = Math.ceil(duration * 0.9);
+  const requiredPoint = Math.ceil(duration * LISTEN_THRESHOLD);
   const loopStartSeconds = conditionMeta ? Math.floor(duration * conditionMeta.loopStartFraction) : 0;
   const listenPercent = duration > 0 ? Math.min((elapsed / duration) * 100, 100) : 0;
+  // The track has played to the end at least once and started again.
+  const hasRepeated = loopCount > 0;
 
   // -------------------------------------------------------------------------
   // On mount: check for magic-link token in URL hash, then check localStorage.
@@ -314,8 +447,8 @@ export function StudyApp() {
       }
       setElapsed(maxListenedSecondsRef.current);
 
-      // Transition to loop phase UI at 90%.
-      if (maxListenedSecondsRef.current >= Math.ceil(durationSec * 0.9)) {
+      // Transition to loop phase UI at the listening threshold (90% by default).
+      if (maxListenedSecondsRef.current >= Math.ceil(durationSec * LISTEN_THRESHOLD)) {
         setIsLooping(true);
       }
     });
@@ -351,6 +484,41 @@ export function StudyApp() {
   // -------------------------------------------------------------------------
   // Participant start
   // -------------------------------------------------------------------------
+  // Welcome page: stop early if this roll number has already taken part.
+  async function checkRollNumber() {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      setError("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+      return;
+    }
+    if (!/^[A-Za-z0-9/_-]{3,40}$/.test(rollNumber.trim())) {
+      setError("Enter a valid roll number.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/is_roll_number_registered`, {
+        method: "POST",
+        headers: apiHeaders(),
+        body: JSON.stringify({ p_roll_number: rollNumber.trim() }),
+      });
+      if (!r.ok) {
+        setError("Could not check your roll number. Please try again.");
+        return;
+      }
+      if ((await r.json()) === true) {
+        setResendNotice(null);
+        setScreen("already_registered");
+        return;
+      }
+      setScreen("details");
+    } catch {
+      setError("Network error. Please check your connection.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function beginStudy() {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       setError("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
@@ -362,7 +530,7 @@ export function StudyApp() {
       const r = await fetch(apiUrl("start-session"), {
         method: "POST",
         headers: apiHeaders(),
-        body: JSON.stringify({ displayName, email, rollNumber, workshop }),
+        body: JSON.stringify({ displayName, email, rollNumber, workshop, intake }),
       });
       const data = await r.json();
       if (!r.ok) {
@@ -468,7 +636,7 @@ export function StudyApp() {
       const payload =
         mode === "device" && participant
           ? { deviceToken: participant.deviceToken }
-          : { email, rollNumber: workshop === "yes" ? rollNumber : "" };
+          : { email, rollNumber };
       const r = await fetch(apiUrl("resend-invitation"), {
         method: "POST",
         headers: apiHeaders(),
@@ -548,13 +716,7 @@ export function StudyApp() {
         headers: apiHeaders(token),
         body: JSON.stringify({
           action: "submit",
-          relaxed: ratings.relaxed,
-          sleepy: ratings.sleepy,
-          alert: ratings.alert,
-          pleasant: ratings.pleasant,
-          musicWorkshop: surveyWorkshop,
-          headphones,
-          notes,
+          answers: survey,
         }),
       });
       const data = await r.json();
@@ -580,7 +742,8 @@ export function StudyApp() {
     email !== "" &&
     displayName !== "" &&
     workshop !== "" &&
-    (workshop !== "yes" || rollNumber !== "");
+    rollNumber.trim() !== "" &&
+    isIntakeComplete(intake);
 
   return (
     <main className="app-shell">
@@ -615,6 +778,49 @@ export function StudyApp() {
             <div><span>02</span><p>Listen until the audio begins repeating, then stop whenever you feel ready.</p></div>
             <div><span>03</span><p>When the audio repeats, tell us if you feel sleepy.</p></div>
           </div>
+          <label className="consent">
+            <input
+              checked={consented}
+              onChange={(e) => setConsented(e.target.checked)}
+              type="checkbox"
+            />
+            <span>I understand that I may stop and leave the study at any time.</span>
+          </label>
+          <div className="details-form">
+            <label className="roll-field">
+              Roll number{" "}
+              <input
+                inputMode="numeric"
+                onChange={(e) => setRollNumber(e.target.value)}
+                placeholder="e.g. 2023101076"
+                required
+                value={rollNumber}
+              />
+            </label>
+          </div>
+          {error && <p className="error-message" role="alert">{error}</p>}
+          <button
+            className="button primary"
+            disabled={!consented || rollNumber.trim() === "" || busy}
+            onClick={checkRollNumber}
+            type="button"
+          >
+            {busy ? "Checking…" : <>Fill details <span aria-hidden="true">→</span></>}
+          </button>
+          {(!SUPABASE_URL || !SUPABASE_ANON_KEY) && (
+            <p className="microcopy config-warning">
+              ⚠ Supabase is not configured — set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Registration details */}
+      {screen === "details" && (
+        <section className="welcome screen" id="top">
+          <button className="back" onClick={() => setScreen("welcome")} type="button">← Back</button>
+          <p className="eyebrow">Before you begin</p>
+          <h1>Tell us a little about you.</h1>
           <div className="details-form">
             <label>
               Full name{" "}
@@ -624,6 +830,17 @@ export function StudyApp() {
                 placeholder="Your full name"
                 required
                 value={displayName}
+              />
+            </label>
+            <label className="roll-field">
+              College email ID
+              <input
+                autoComplete="email"
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@<designation>.iiit.ac.in"
+                required
+                type="email"
+                value={email}
               />
             </label>
             <fieldset className="workshop-choice">
@@ -647,42 +864,135 @@ export function StudyApp() {
                 </button>
               </div>
             </fieldset>
-            <div className={workshop ? "email-card flipped" : "email-card"}>
-              <div className="email-card-face">
-                {workshop === "yes" && (
-                  <label>
-                    Roll number{" "}
-                    <input
-                      onChange={(e) => setRollNumber(e.target.value)}
-                      placeholder="e.g. 24MUS001"
-                      required
-                      value={rollNumber}
-                    />
-                  </label>
-                )}
-                <label>
-                  {workshop === "yes" ? "College email" : "Email address"}
-                  <input
-                    autoComplete="email"
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder={workshop === "yes" ? "you@college.edu" : "you@example.com"}
-                    required
-                    type="email"
-                    value={email}
-                  />
-                </label>
-              </div>
-            </div>
           </div>
-          <label className="consent">
-            <input
-              checked={consented}
-              onChange={(e) => setConsented(e.target.checked)}
-              type="checkbox"
+
+          <section className="intake-section">
+            <h2>A · About you</h2>
+            <ChoiceQuestion
+              label="Age group"
+              options={AGE_GROUPS}
+              selected={[intake.ageGroup]}
+              onToggle={(v) => updateIntake({ ageGroup: v })}
             />
-            <span>I understand that I may stop and leave the study at any time.</span>
-          </label>
+            <label className="intake-question intake-text">
+              Branch
+              <input
+                onChange={(e) => updateIntake({ branch: e.target.value })}
+                placeholder="e.g. CSE, ECE"
+                value={intake.branch}
+              />
+            </label>
+            <ChoiceQuestion
+              label="Current year"
+              options={CURRENT_YEARS}
+              selected={[intake.currentYear]}
+              onToggle={(v) => updateIntake({ currentYear: v })}
+            />
+            <ChoiceQuestion
+              label="Do you have formal training in music?"
+              options={MUSIC_TRAINING}
+              selected={[intake.musicTraining]}
+              onToggle={(v) => updateIntake({ musicTraining: v })}
+            />
+          </section>
+
+          <section className="intake-section">
+            <h2>B · Your sleep</h2>
+            <label className="intake-question intake-text">
+              On a usual night, how many minutes does it take you to fall asleep?
+              <input
+                inputMode="numeric"
+                onChange={(e) => updateIntake({ sleepLatencyMinutes: e.target.value.replace(/\D/g, "") })}
+                placeholder="e.g. 20"
+                value={intake.sleepLatencyMinutes}
+              />
+              {intake.sleepLatencyMinutes !== "" && !isValidSleepLatency(intake.sleepLatencyMinutes) && (
+                <span className="intake-hint">Enter a number of minutes from 0 to 300.</span>
+              )}
+            </label>
+            <ScaleQuestion
+              label="How would you rate your sleep over the last month?"
+              left="Very bad"
+              right="Very good"
+              value={intake.sleepQuality ? Number(intake.sleepQuality) : null}
+              onChange={(v) => updateIntake({ sleepQuality: String(v) })}
+            />
+          </section>
+
+          <section className="intake-section">
+            <h2>C · Your listening habits</h2>
+            <ChoiceQuestion
+              label="How often do you listen to music before sleep or while falling asleep?"
+              options={SLEEP_LISTENING}
+              selected={[intake.sleepListening]}
+              onToggle={(v) => updateIntake({ sleepListening: v })}
+            />
+            <ChoiceQuestion
+              label="Which genre(s) do you typically listen to before or while sleeping?"
+              hint="Select all that apply"
+              multiple
+              options={GENRES}
+              selected={intake.sleepGenres}
+              onToggle={(v) =>
+                updateIntake({
+                  sleepGenres: intake.sleepGenres.includes(v)
+                    ? intake.sleepGenres.filter((g) => g !== v)
+                    : [...intake.sleepGenres, v],
+                })
+              }
+            />
+            <ChoiceQuestion
+              label="How familiar are you with Indian classical music (Raagas / Taalas)?"
+              options={CLASSICAL_FAMILIARITY}
+              selected={[intake.classicalFamiliarity]}
+              onToggle={(v) => updateIntake({ classicalFamiliarity: v })}
+            />
+          </section>
+
+          <section className="intake-section">
+            <h2>D · Your beliefs about music &amp; sleep</h2>
+            <ChoiceQuestion
+              label="Overall, do you believe music helps you fall asleep or sleep better?"
+              options={MUSIC_HELPS_SLEEP}
+              selected={[intake.musicHelpsSleep]}
+              onToggle={(v) => updateIntake({ musicHelpsSleep: v })}
+            />
+            <RankQuestion
+              label="Rank these music styles from MOST to LEAST helpful for YOUR sleep"
+              hint="1 = most helpful, 5 = least helpful. Each number can be used once."
+              items={RANK_STYLES}
+              ranking={intake.sleepRanking}
+              onChange={(r) => updateIntake({ sleepRanking: r })}
+            />
+            <ChoiceQuestion
+              label="Do you think Indian classical Raagas and Taalas have a distinct effect on relaxation or sleep compared to other music?"
+              options={RAAGA_EFFECT}
+              selected={[intake.raagaEffect]}
+              onToggle={(v) => updateIntake({ raagaEffect: v })}
+            />
+            <fieldset className="intake-question">
+              <legend>In general, how much do you believe lyrics (words in a song) disturb sleep?</legend>
+              <input
+                aria-label="Lyrics disturb sleep, 1 to 7"
+                className="intake-range"
+                max={7}
+                min={1}
+                onChange={(e) => updateIntake({ lyricsDisturbSleep: Number(e.target.value) })}
+                type="range"
+                value={intake.lyricsDisturbSleep}
+              />
+              <div className="rating-labels">
+                <span>Not at all</span>
+                <span>Score: {intake.lyricsDisturbSleep}/7</span>
+                <span>Extremely</span>
+              </div>
+            </fieldset>
+          </section>
+
           {error && <p className="error-message" role="alert">{error}</p>}
+          {!canBegin && !busy && (
+            <p className="microcopy">Answer every question above to continue.</p>
+          )}
           <button
             className="button primary"
             disabled={!canBegin}
@@ -691,11 +1001,6 @@ export function StudyApp() {
           >
             {busy ? "Starting…" : <>Begin listening <span aria-hidden="true">→</span></>}
           </button>
-          {(!SUPABASE_URL || !SUPABASE_ANON_KEY) && (
-            <p className="microcopy config-warning">
-              ⚠ Supabase is not configured — set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.
-            </p>
-          )}
         </section>
       )}
 
@@ -704,10 +1009,10 @@ export function StudyApp() {
         <section className="complete screen">
           <div className="completion-icon" aria-hidden="true">↩</div>
           <p className="eyebrow">Already registered</p>
-          <h1>Welcome back.</h1>
+          <h1>You have already taken the test.</h1>
           <p className="intro">
-            A session already exists for these details. Return on the same device you used to start,
-            or use the secure link in your invitation email.
+            This roll number is already registered, and each person can take part only once.
+            If you haven&apos;t filled in the morning reflection yet, use the link sent to your email.
           </p>
           <button className="button primary" disabled={resendBusy} onClick={() => resendInvitation("details")} type="button">
             {resendBusy ? "Sending…" : "Didn't get the email? Resend it"}
@@ -726,17 +1031,19 @@ export function StudyApp() {
         <section className="player-screen screen" aria-live="polite">
           <div className="session-meta">
             <span>Session in progress</span>
-            <span>{isLooping ? "Loop phase" : "Listening phase"}</span>
+            <span>{hasRepeated ? "Loop phase" : "Listening phase"}</span>
           </div>
           <div className={isPlaying ? "orb playing" : "orb"} aria-hidden="true">
             <i /><i /><i /><i /><i />
           </div>
           <p className="eyebrow">Listening session</p>
-          <h1>{isLooping ? "The audio is repeating." : "Make space for the sound."}</h1>
+          <h1>{hasRepeated ? "The audio is repeating." : "Make space for the sound."}</h1>
           <p className="player-copy">
-            {isLooping
+            {hasRepeated
               ? "When you are ready, stop the session to continue to the reflection."
-              : "This listening phase has no pause control. Keep this page open while you listen."}
+              : isLooping
+                ? "Keep listening. Whenever you feel sleepy, stop the session to continue."
+                : "This listening phase has no pause control. Keep this page open while you listen."}
           </p>
           {audioError ? (
             <p className="error-message config-warning" role="alert">{audioError}</p>
@@ -751,7 +1058,13 @@ export function StudyApp() {
               </div>
               <div className="time-row">
                 <span>{formatTime(elapsed)}</span>
-                <span>{isLooping ? `Loop ${loopCount}` : `Listening · ${formatTime(requiredPoint)} minimum`}</span>
+                <span>
+                  {hasRepeated
+                    ? `Loop ${loopCount}`
+                    : isLooping
+                      ? "Minimum reached"
+                      : `Listening · ${formatTime(requiredPoint)} minimum`}
+                </span>
                 <span>{formatTime(duration)}</span>
               </div>
             </>
@@ -836,79 +1149,179 @@ export function StudyApp() {
       {screen === "survey" && (
         <section className="survey screen">
           <div className="survey-heading">
-            <p className="eyebrow">Reflection</p>
-            <h1>How do you feel now?</h1>
-            <p>Choose the number that feels most accurate in this moment.</p>
+            <p className="eyebrow">Morning reflection</p>
+            <h1>How did you sleep?</h1>
+            <p>A few questions about last night. It takes about three minutes.</p>
           </div>
           <form onSubmit={submitSurvey}>
-            <div className="form-card">
-              <Rating
-                label="How relaxed do you feel?"
-                left="Not relaxed"
-                right="Very relaxed"
-                value={ratings.relaxed}
-                onChange={(v) => setRatings((s) => ({ ...s, relaxed: v }))}
+            <section className="form-card survey-part">
+              <h2>1 · Your night</h2>
+              <div className="survey-pair">
+                <label className="intake-question intake-text">
+                  What time did you get into bed and try to sleep?
+                  <input onChange={(e) => updateSurvey({ bedTime: e.target.value })} type="time" value={survey.bedTime} />
+                </label>
+                <label className="intake-question intake-text">
+                  What time did you wake up for the day?
+                  <input onChange={(e) => updateSurvey({ wakeTime: e.target.value })} type="time" value={survey.wakeTime} />
+                </label>
+              </div>
+              <label className="intake-question intake-text">
+                Roughly how many minutes did it take you to fall asleep?
+                <span className="unit-input">
+                  <input
+                    inputMode="numeric"
+                    onChange={(e) => updateSurvey({ sleepLatencyMinutes: e.target.value.replace(/\D/g, "") })}
+                    placeholder="e.g. 20"
+                    value={survey.sleepLatencyMinutes}
+                  />
+                  <span>min</span>
+                </span>
+              </label>
+              <label className="intake-question intake-text">
+                How many times do you remember waking up during the night?
+                <span className="unit-input">
+                  <input
+                    inputMode="numeric"
+                    onChange={(e) => updateSurvey({ awakenings: e.target.value.replace(/\D/g, "") })}
+                    placeholder="0 if none"
+                    value={survey.awakenings}
+                  />
+                  <span>times</span>
+                </span>
+              </label>
+              <fieldset className="intake-question">
+                <legend>Roughly how long did you sleep in total?</legend>
+                <div className="unit-row">
+                  <span className="unit-input">
+                    <input
+                      aria-label="Hours slept"
+                      inputMode="numeric"
+                      onChange={(e) => updateSurvey({ totalSleepHours: e.target.value.replace(/\D/g, "") })}
+                      placeholder="7"
+                      value={survey.totalSleepHours}
+                    />
+                    <span>h</span>
+                  </span>
+                  <span className="unit-input">
+                    <input
+                      aria-label="Extra minutes slept"
+                      inputMode="numeric"
+                      onChange={(e) => updateSurvey({ totalSleepMinutes: e.target.value.replace(/\D/g, "") })}
+                      placeholder="30"
+                      value={survey.totalSleepMinutes}
+                    />
+                    <span>min</span>
+                  </span>
+                </div>
+              </fieldset>
+            </section>
+
+            <section className="form-card survey-part">
+              <h2>2 · How it felt</h2>
+              <ScaleQuestion
+                label="How well did you sleep last night?"
+                left="Very badly"
+                right="Very well"
+                value={survey.sleepQuality}
+                onChange={(v) => updateSurvey({ sleepQuality: v })}
               />
-              <Rating
-                label="How sleepy do you feel?"
-                left="Not sleepy"
-                right="Very sleepy"
-                value={ratings.sleepy}
-                onChange={(v) => setRatings((s) => ({ ...s, sleepy: v }))}
+              <ScaleQuestion
+                label="How easy was it to fall asleep?"
+                left="Very hard"
+                right="Very easy"
+                value={survey.easeFallingAsleep}
+                onChange={(v) => updateSurvey({ easeFallingAsleep: v })}
               />
-              <Rating
-                label="How alert do you feel?"
-                left="Not alert"
+              <ScaleQuestion
+                label="How rested do you feel right now?"
+                left="Not at all"
+                right="Fully rested"
+                value={survey.restedNow}
+                onChange={(v) => updateSurvey({ restedNow: v })}
+              />
+              <ScaleQuestion
+                label="How awake and alert do you feel right now?"
+                left="Very sleepy"
                 right="Very alert"
-                value={ratings.alert}
-                onChange={(v) => setRatings((s) => ({ ...s, alert: v }))}
+                value={survey.alertNow}
+                onChange={(v) => updateSurvey({ alertNow: v })}
               />
-              <Rating
-                label="How pleasant was the audio?"
-                left="Not pleasant"
-                right="Very pleasant"
-                value={ratings.pleasant}
-                onChange={(v) => setRatings((s) => ({ ...s, pleasant: v }))}
+            </section>
+
+            <section className="form-card survey-part">
+              <h2>3 · The audio</h2>
+              <ChoiceQuestion
+                label="Did the audio keep playing until you stopped the session?"
+                options={YES_NO_UNSURE}
+                selected={[survey.audioPlayedFully]}
+                onToggle={(v) => updateSurvey({ audioPlayedFully: v })}
               />
-            </div>
-            <div className="form-card background-card">
-              <h2>A little about you</h2>
+              <ChoiceQuestion
+                label="Were you asleep before the audio ended?"
+                options={YES_NO_UNSURE}
+                selected={[survey.asleepBeforeAudioEnded]}
+                onToggle={(v) => updateSurvey({ asleepBeforeAudioEnded: v })}
+              />
+              <ChoiceQuestion
+                label="Had you heard this music before?"
+                options={YES_NO}
+                selected={[survey.heardBefore]}
+                onToggle={(v) => updateSurvey({ heardBefore: v })}
+              />
+              <ScaleQuestion
+                label="How much did you like it?"
+                left="Not at all"
+                right="Loved it"
+                value={survey.likedMusic}
+                onChange={(v) => updateSurvey({ likedMusic: v })}
+              />
+              <ChoiceQuestion
+                label="Was the volume comfortable?"
+                options={VOLUME}
+                selected={[survey.volume]}
+                onToggle={(v) => updateSurvey({ volume: v })}
+              />
+            </section>
+
+            <section className="form-card survey-part">
+              <h2>4 · Anything that could have affected your night</h2>
+              <ChoiceQuestion
+                label="Yesterday or last night I had:"
+                hint="Tick all that apply"
+                multiple
+                options={NIGHT_FACTORS}
+                selected={survey.factors}
+                onToggle={(v) => updateSurvey({ factors: toggleFactor(survey.factors, v) })}
+              />
+            </section>
+
+            <section className="form-card survey-part background-card">
+              <h2>5 · Optional</h2>
               <label>
-                Are you part of a music workshop?
-                <select
-                  value={surveyWorkshop}
-                  onChange={(e) => setSurveyWorkshop(e.target.value)}
-                  required
-                >
-                  <option value="" disabled>Select one</option>
-                  <option value="yes_currently">Yes, currently</option>
-                  <option value="previously">Previously</option>
-                  <option value="no">No</option>
-                  <option value="prefer_not">Prefer not to say</option>
-                </select>
-              </label>
-              <label>
-                Were you using headphones?
-                <select
-                  value={headphones}
-                  onChange={(e) => setHeadphones(e.target.value)}
-                  required
-                >
-                  <option value="" disabled>Select one</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
-                </select>
-              </label>
-              <label>
-                Anything you noticed while listening?
+                How did the audio make you feel while you were falling asleep?
                 <textarea
-                  onChange={(e) => setNotes(e.target.value)}
+                  maxLength={MAX_TEXT_CHARACTERS}
+                  onChange={(e) => updateSurvey({ audioFeeling: e.target.value })}
                   placeholder="Optional"
                   rows={3}
-                  value={notes}
+                  value={survey.audioFeeling}
                 />
               </label>
-            </div>
+              <label>
+                Anything else about your night?
+                <textarea
+                  maxLength={MAX_TEXT_CHARACTERS}
+                  onChange={(e) => updateSurvey({ otherNotes: e.target.value })}
+                  placeholder="Optional"
+                  rows={3}
+                  value={survey.otherNotes}
+                />
+              </label>
+            </section>
+            {!allRatingsComplete && !busy && (
+              <p className="microcopy">Answer every question in parts 1–4 to submit.</p>
+            )}
             {error && <p className="error-message" role="alert">{error}</p>}
             <button
               className="button primary"

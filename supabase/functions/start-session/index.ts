@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, hash, json } from "../_shared/http.ts";
 import { logError } from "../_shared/log.ts";
+import { parseIntake } from "./intake.ts";
 
 const admin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -38,13 +39,17 @@ Deno.serve(async (request) => {
 
   // Validate required fields.
   if (!/^\S+@\S+\.\S+$/.test(normalizedEmail ?? "")) {
-    return json({ error: fromWorkshop ? "Enter a valid college email." : "Enter a valid email." }, 400);
+    return json({ error: "Enter a valid college email ID." }, 400);
   }
-  if (fromWorkshop && !/^[A-Za-z0-9/_-]{3,40}$/.test(normalizedRoll ?? "")) {
+  if (!/^[A-Za-z0-9/_-]{3,40}$/.test(normalizedRoll ?? "")) {
     return json({ error: "Enter a valid roll number." }, 400);
   }
   if (!String(displayName ?? "").trim()) {
     return json({ error: "Enter your full name." }, 400);
+  }
+  const intake = parseIntake((body as Record<string, unknown>).intake);
+  if (!intake) {
+    return json({ error: "Please answer every question in the form." }, 400);
   }
 
   // Parameterized lookups for existing email
@@ -61,8 +66,8 @@ Deno.serve(async (request) => {
     );
   }
 
-  // Parameterized lookup for existing roll_number (if workshop)
-  if (fromWorkshop && normalizedRoll) {
+  // Parameterized lookup for existing roll_number
+  if (normalizedRoll) {
     const { data: existingRoll } = await admin
       .from("participants")
       .select("id")
@@ -82,9 +87,10 @@ Deno.serve(async (request) => {
     .from("participants")
     .insert({
       email: normalizedEmail!,
-      roll_number: fromWorkshop ? normalizedRoll : null,
+      roll_number: normalizedRoll,
       display_name: String(displayName ?? "").trim() || null,
       from_workshop: fromWorkshop,
+      intake,
     })
     .select("id")
     .single();

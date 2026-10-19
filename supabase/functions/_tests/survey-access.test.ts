@@ -28,16 +28,28 @@ async function releasedSession(sessionOverrides: Record<string, unknown> = {}) {
   return { participant, session };
 }
 
-const validSubmission = {
-  action: "submit",
-  relaxed: 7,
-  sleepy: 6,
-  alert: 4,
-  pleasant: 8,
-  musicWorkshop: "no",
-  headphones: "yes",
-  notes: "Felt calm",
+const validAnswers = {
+  bedTime: "23:30",
+  wakeTime: "07:15",
+  sleepLatencyMinutes: "20",
+  awakenings: "1",
+  totalSleepHours: "7",
+  totalSleepMinutes: "10",
+  sleepQuality: 4,
+  easeFallingAsleep: 3,
+  restedNow: 4,
+  alertNow: 3,
+  audioPlayedFully: "Yes",
+  asleepBeforeAudioEnded: "No",
+  heardBefore: "No",
+  likedMusic: 5,
+  volume: "Just right",
+  factors: ["None of these"],
+  audioFeeling: "",
+  otherNotes: "Felt calm",
 };
+
+const validSubmission = { action: "submit", answers: validAnswers };
 
 Deno.test("survey-access: rejects a queued session even after its release time", async () => {
   setupTest();
@@ -97,7 +109,10 @@ Deno.test("survey-access: saves one submission and marks the session submitted",
   assert.equal(response.status, 200);
   assert.deepEqual(response.body, { available: false, submitted: true });
   assert.equal(rowsOf("survey_responses").length, 1);
-  assert.equal(rowsOf("survey_responses")[0].notes, "Felt calm");
+  const saved = rowsOf("survey_responses")[0].answers as Record<string, unknown>;
+  assert.equal(saved.otherNotes, "Felt calm");
+  assert.equal(saved.audioFeeling, null, "blank optional answers are stored as null");
+  assert.equal(saved.totalSleepMinutes, 430, "hours and minutes are stored as total minutes");
   assert.equal(session.status, "survey_submitted");
   assert.equal(participant.auth_user_id, "auth-user-1", "email match links the sign-in to the participant");
 });
@@ -116,18 +131,21 @@ Deno.test("survey-access: a second submission does not save again", async () => 
   assert.equal(rowsOf("survey_responses").length, 1);
 });
 
-Deno.test("survey-access: rejects invalid answers and notes over 2000 characters", async () => {
+Deno.test("survey-access: rejects invalid answers and written answers over 2000 characters", async () => {
   setupTest();
   const handler = await loadFunction("survey-access");
   signIn();
   await releasedSession();
 
-  const badWorkshop = await callFunction(handler, { ...validSubmission, musicWorkshop: "robot" }, AUTH_HEADERS);
-  const badHeadphones = await callFunction(handler, { ...validSubmission, headphones: "maybe" }, AUTH_HEADERS);
-  const longNotes = await callFunction(handler, { ...validSubmission, notes: "x".repeat(2001) }, AUTH_HEADERS);
+  const submit = (changes: Record<string, unknown>) =>
+    callFunction(handler, { action: "submit", answers: { ...validAnswers, ...changes } }, AUTH_HEADERS);
 
-  assert.equal(badWorkshop.status, 400);
-  assert.equal(badHeadphones.status, 400);
-  assert.equal(longNotes.status, 400);
+  assert.equal((await submit({ volume: "robot" })).status, 400);
+  assert.equal((await submit({ bedTime: "25:00" })).status, 400);
+  assert.equal((await submit({ sleepQuality: 6 })).status, 400);
+  assert.equal((await submit({ factors: [] })).status, 400);
+  assert.equal((await submit({ factors: ["None of these", "Alcohol"] })).status, 400);
+  assert.equal((await submit({ otherNotes: "x".repeat(2001) })).status, 400);
+  assert.equal((await callFunction(handler, { action: "submit" }, AUTH_HEADERS)).status, 400);
   assert.equal(rowsOf("survey_responses").length, 0);
 });

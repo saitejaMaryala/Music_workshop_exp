@@ -18,6 +18,19 @@ function readSurveyDelaySeconds(): number {
 }
 const delaySeconds = readSurveyDelaySeconds();
 
+// Fraction of the track that must be heard (and of real time that must pass). Defaults to 0.9.
+// Lower it (e.g. 0.05) only on a test project. A bad value stops this function at start-up.
+function readListenThreshold(): number {
+  const raw = Deno.env.get("LISTEN_THRESHOLD")?.trim();
+  if (!raw) return 0.9;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0 || value > 1) {
+    throw new Error("LISTEN_THRESHOLD must be a number greater than 0 and at most 1.");
+  }
+  return value;
+}
+const listenThreshold = readListenThreshold();
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -41,14 +54,14 @@ Deno.serve(async (request) => {
   if (session.status !== "listening") return json({ error: "This session is no longer available." }, 409);
 
   // Check client-reported listened seconds
-  if (numListened < Math.ceil(session.duration_seconds * 0.9)) {
+  if (numListened < Math.ceil(session.duration_seconds * listenThreshold)) {
     return json({ error: "Listening threshold has not been reached." }, 403);
   }
 
-  // Require real elapsed wall-clock time since created_at >= 90% of duration_seconds
+  // Require real elapsed wall-clock time since created_at >= threshold × duration_seconds
   const createdAtMs = new Date(session.created_at).getTime();
   const realElapsedSeconds = (Date.now() - createdAtMs) / 1000;
-  const requiredSeconds = session.duration_seconds * 0.9;
+  const requiredSeconds = session.duration_seconds * listenThreshold;
   if (realElapsedSeconds < requiredSeconds) {
     return json({ error: "Playback duration threshold has not elapsed." }, 403);
   }

@@ -1,20 +1,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, getBearer, json } from "../_shared/http.ts";
 import { logError } from "../_shared/log.ts";
+import { parseMorningSurvey } from "./morning-survey.ts";
 
 const admin = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
-
-// Allowed answers. Keep these in line with the options in app/study-app.tsx.
-const MUSIC_WORKSHOP_OPTIONS = ["yes_currently", "previously", "no", "prefer_not"];
-const HEADPHONE_OPTIONS = ["yes", "no"];
-const MAX_NOTES_CHARACTERS = 2000;
-
-function isRating(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 10;
-}
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -117,32 +109,15 @@ Deno.serve(async (request) => {
     return json({ available: true, submitted: false, participantId: participant.id });
   }
 
-  if (!["relaxed", "sleepy", "alert", "pleasant"].every((field) => isRating(body[field]))) {
-    return json({ error: "All ratings must be whole numbers from 1 to 10." }, 400);
-  }
-  if (typeof body.musicWorkshop !== "string" || !MUSIC_WORKSHOP_OPTIONS.includes(body.musicWorkshop)) {
-    return json({ error: "Choose a valid answer for the workshop question." }, 400);
-  }
-  if (typeof body.headphones !== "string" || !HEADPHONE_OPTIONS.includes(body.headphones)) {
-    return json({ error: "Choose a valid answer for the headphones question." }, 400);
-  }
-  const notes = typeof body.notes === "string" ? body.notes.trim() : "";
-  if (Array.from(notes).length > MAX_NOTES_CHARACTERS) {
-    return json({ error: `Notes must be ${MAX_NOTES_CHARACTERS} characters or fewer.` }, 400);
-  }
+  const parsed = parseMorningSurvey(body.answers);
+  if ("error" in parsed) return json({ error: parsed.error }, 400);
 
   const { error: insertError } = await admin
     .from("survey_responses")
     .insert({
       session_id: session.id,
       participant_id: participant.id,
-      relaxed: body.relaxed,
-      sleepy: body.sleepy,
-      alert: body.alert,
-      pleasant: body.pleasant,
-      music_workshop: body.musicWorkshop,
-      headphones: body.headphones,
-      notes: notes || null,
+      answers: parsed.survey,
     });
 
   if (insertError) {
