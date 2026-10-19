@@ -68,6 +68,12 @@ const CONDITION_METADATA: Record<string, { filename: string; loopStartFraction: 
 // Must match the LISTEN_THRESHOLD secret of the qualify-session Edge Function.
 const LISTEN_THRESHOLD = Number(process.env.NEXT_PUBLIC_LISTEN_THRESHOLD) || 0.9;
 
+// How long a listening session lasts, in minutes of audio played (the track repeats until then).
+// When it is over the audio stops and the page moves on by itself. If the listening threshold
+// above has not been reached by then, the session keeps playing until it has.
+const SESSION_MINUTES = 1;
+const SESSION_SECONDS = SESSION_MINUTES * 60;
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
@@ -353,8 +359,20 @@ export function StudyApp() {
   // Player state
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const maxListenedSecondsRef = useRef(0);
+  // Seconds of audio played in this session, repeats included. Ends the session at SESSION_SECONDS.
+  const playedSecondsRef = useRef(0);
+  const loopCountRef = useRef(0);
+  const participantRef = useRef<ParticipantState | null>(null);
+  // Qualification happens in the background once the threshold is reached.
+  const qualifyRef = useRef<{ done: boolean; inFlight: boolean; lastAttempt: number }>({
+    done: false,
+    inFlight: false,
+    lastAttempt: 0,
+  });
+  const sessionEndedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [playedSeconds, setPlayedSeconds] = useState(0);
   const [isLooping, setIsLooping] = useState(false);
   const [loopCount, setLoopCount] = useState(0);
   const [audioError, setAudioError] = useState<string | null>(null);
@@ -390,7 +408,7 @@ export function StudyApp() {
   const duration = participant?.durationSeconds ?? 0;
   const requiredPoint = Math.ceil(duration * LISTEN_THRESHOLD);
   const loopStartSeconds = conditionMeta ? Math.floor(duration * conditionMeta.loopStartFraction) : 0;
-  const listenPercent = duration > 0 ? Math.min((elapsed / duration) * 100, 100) : 0;
+  const sessionPercent = Math.min((playedSeconds / SESSION_SECONDS) * 100, 100);
   // The track has played to the end at least once and started again.
   const hasRepeated = loopCount > 0;
 
@@ -491,6 +509,12 @@ export function StudyApp() {
     releaseAudio(audioRef.current);
 
     maxListenedSecondsRef.current = 0;
+    playedSecondsRef.current = 0;
+    loopCountRef.current = 0;
+    qualifyRef.current = { done: false, inFlight: false, lastAttempt: 0 };
+    sessionEndedRef.current = false;
+    setPlayedSeconds(0);
+    let lastTime = 0;
     const filename = CONDITION_METADATA[conditionId]?.filename ?? `${conditionId}.mpeg`;
     const audio = new Audio();
     audio.src = `${AUDIO_BASE_URL}/${filename}`;
@@ -500,15 +524,27 @@ export function StudyApp() {
     const loopStart = Math.floor(durationSec * (CONDITION_METADATA[conditionId]?.loopStartFraction ?? 0.6));
 
     audio.addEventListener("timeupdate", () => {
+      // Count real playback only: small forward steps, not the jump back when the track repeats.
+      const step = audio.currentTime - lastTime;
+      lastTime = audio.currentTime;
+      if (step > 0 && step < 2) playedSecondsRef.current += step;
+      setPlayedSeconds(Math.floor(playedSecondsRef.current));
+
       const current = Math.floor(audio.currentTime);
       if (current > maxListenedSecondsRef.current) {
         maxListenedSecondsRef.current = current;
       }
       setElapsed(maxListenedSecondsRef.current);
 
-      // Transition to loop phase UI at the listening threshold (90% by default).
+      // Threshold reached (90% by default): qualify in the background, which starts the email countdown.
       if (maxListenedSecondsRef.current >= Math.ceil(durationSec * LISTEN_THRESHOLD)) {
         setIsLooping(true);
+        void qualifyInBackground();
+      }
+
+      // Session over: stop and move on, but only once qualification has gone through.
+      if (playedSecondsRef.current >= SESSION_SECONDS && qualifyRef.current.done) {
+        finishSession();
       }
     });
 
@@ -517,7 +553,9 @@ export function StudyApp() {
 
     // On ended: jump to loopStart and continue playing (without audio.loop)
     audio.addEventListener("ended", () => {
-      setLoopCount((c) => c + 1);
+      loopCountRef.current += 1;
+      setLoopCount(loopCountRef.current);
+      lastTime = loopStart;
       audio.currentTime = loopStart;
       audio.play().catch(() => {});
     });
@@ -532,6 +570,11 @@ export function StudyApp() {
       );
     });
   }
+
+  // Audio callbacks read the participant from a ref, since they outlive the render that made them.
+  useEffect(() => {
+    participantRef.current = participant;
+  }, [participant]);
 
   // Cleanup audio on unmount.
   useEffect(() => {
@@ -612,6 +655,7 @@ export function StudyApp() {
       setElapsed(0);
       setLoopCount(0);
       setIsLooping(false);
+      setPlayedSeconds(0);
       setScreen("listen");
     } catch {
       setError("Network error. Please check your connection.");
@@ -631,43 +675,52 @@ export function StudyApp() {
   }
 
   // -------------------------------------------------------------------------
-  // Qualification ("I'm sleepy")
+  // Qualification (automatic, in the background) and end of session
   // -------------------------------------------------------------------------
-  async function stopListening() {
-    setBusy(true);
-    setError(null);
-
-    const listenedSeconds = maxListenedSecondsRef.current;
-
-    try {
-      if (SUPABASE_URL && SUPABASE_ANON_KEY && participant) {
-        const r = await fetch(apiUrl("qualify-session"), {
-          method: "POST",
-          headers: apiHeaders(),
-          body: JSON.stringify({
-            deviceToken: participant.deviceToken,
-            listenedSeconds,
-            loopCount, // Only real repeats. The audio never repeated if this is 0.
-          }),
-        });
-        const data = await r.json();
-        if (!r.ok) {
-          setError(data.error ?? "Could not qualify session.");
-          setBusy(false);
-          return;
-        }
-        if (typeof data.releaseAt === "string") setReleaseAt(data.releaseAt);
-      }
-
-      // Only pause and clear audio AFTER qualify-session fetch succeeds
-      releaseAudio(audioRef.current);
-      setIsPlaying(false);
-      setScreen("waiting");
-    } catch {
-      setError("Network error during qualification. Please try again.");
-    } finally {
-      setBusy(false);
+  // Tells the server the listening threshold was reached, which sets the email release time.
+  // Retries every 10 seconds while the audio keeps playing if a call fails.
+  async function qualifyInBackground() {
+    const q = qualifyRef.current;
+    const p = participantRef.current;
+    if (q.done || q.inFlight || Date.now() - q.lastAttempt < 10_000) return;
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !p) {
+      q.done = true; // nothing to tell (Supabase not configured)
+      return;
     }
+    q.inFlight = true;
+    q.lastAttempt = Date.now();
+    try {
+      const r = await fetch(apiUrl("qualify-session"), {
+        method: "POST",
+        headers: apiHeaders(),
+        body: JSON.stringify({
+          deviceToken: p.deviceToken,
+          listenedSeconds: maxListenedSecondsRef.current,
+          loopCount: loopCountRef.current, // Only real repeats. The audio never repeated if this is 0.
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok || r.status === 409) {
+        // 409: the session was already qualified (for example, from another tab).
+        q.done = true;
+        if (typeof data.releaseAt === "string") setReleaseAt(data.releaseAt);
+        if (playedSecondsRef.current >= SESSION_SECONDS) finishSession();
+      } else {
+        console.warn("qualify-session:", data.error ?? r.status);
+      }
+    } catch {
+      console.warn("qualify-session: network error, will retry");
+    } finally {
+      q.inFlight = false;
+    }
+  }
+
+  function finishSession() {
+    if (sessionEndedRef.current) return;
+    sessionEndedRef.current = true;
+    releaseAudio(audioRef.current);
+    setIsPlaying(false);
+    setScreen("waiting");
   }
 
   // Tick once a second on the waiting screen so the Resend button appears when the wait is over.
@@ -834,8 +887,8 @@ export function StudyApp() {
           </p>
           <div className="details-card">
             <div><span>01</span><p>Choose a calm place and use headphones if available.</p></div>
-            <div><span>02</span><p>Listen until the audio begins repeating, then stop whenever you feel ready.</p></div>
-            <div><span>03</span><p>When the audio repeats, tell us if you feel sleepy.</p></div>
+            <div><span>02</span><p>Press play, put your phone down and rest. The audio stops by itself.</p></div>
+            <div><span>03</span><p>The next morning, open the link in your email and fill in the reflection.</p></div>
           </div>
           <label className="consent">
             <input
@@ -1103,11 +1156,9 @@ export function StudyApp() {
           <p className="eyebrow">Listening session</p>
           <h1>{hasRepeated ? "The audio is repeating." : "Make space for the sound."}</h1>
           <p className="player-copy">
-            {hasRepeated
-              ? "When you are ready, stop the session to continue to the reflection."
-              : isLooping
-                ? "Keep listening. Whenever you feel sleepy, stop the session to continue."
-                : "This listening phase has no pause control. Keep this page open while you listen."}
+            {isPlaying || playedSeconds > 0
+              ? `Put your phone down and rest. The audio stops by itself after ${SESSION_MINUTES} minute${SESSION_MINUTES === 1 ? "" : "s"}.`
+              : "Press play, then put your phone down and rest. There is nothing else to do — keep this page open."}
           </p>
           {audioError ? (
             <p className="error-message config-warning" role="alert">{audioError}</p>
@@ -1115,42 +1166,26 @@ export function StudyApp() {
             <>
               <div
                 className="timeline"
-                aria-label={`Listening progress: ${Math.round(listenPercent)} percent`}
+                aria-label={`Session progress: ${Math.round(sessionPercent)} percent`}
               >
-                <div className="timeline-fill" style={{ width: `${listenPercent}%` }} />
-                <span className="timeline-thumb" style={{ left: `${listenPercent}%` }} />
+                <div className="timeline-fill" style={{ width: `${sessionPercent}%` }} />
+                <span className="timeline-thumb" style={{ left: `${sessionPercent}%` }} />
               </div>
               <div className="time-row">
-                <span>{formatTime(elapsed)}</span>
-                <span>
-                  {hasRepeated
-                    ? `Loop ${loopCount}`
-                    : isLooping
-                      ? "Minimum reached"
-                      : `Listening · ${formatTime(requiredPoint)} minimum`}
-                </span>
-                <span>{formatTime(duration)}</span>
+                <span>{formatTime(Math.min(playedSeconds, SESSION_SECONDS))}</span>
+                <span>{hasRepeated ? `Loop ${loopCount}` : "Listening"}</span>
+                <span>{formatTime(SESSION_SECONDS)}</span>
               </div>
             </>
           )}
           <div className="player-actions">
-            {!isPlaying && !isLooping && (
+            {!isPlaying && (
               <button className="play-button" onClick={startPlayback} type="button">
-                <span aria-hidden="true">▶</span>Start listening
+                <span aria-hidden="true">▶</span>{playedSeconds > 0 ? "Resume listening" : "Start listening"}
               </button>
             )}
-            {isPlaying && !isLooping && (
+            {isPlaying && (
               <span className="listening-indicator">Listening in progress</span>
-            )}
-            {isLooping && (
-              <button
-                className="button primary sleepy-button"
-                disabled={busy}
-                onClick={stopListening}
-                type="button"
-              >
-                {busy ? "Saving…" : <>I&apos;m sleepy <span aria-hidden="true">→</span></>}
-              </button>
             )}
             {process.env.NEXT_PUBLIC_ENABLE_TEST_MODE === "1" && isTestMode && !isLooping && (
               <button
