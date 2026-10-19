@@ -71,7 +71,7 @@ const LISTEN_THRESHOLD = Number(process.env.NEXT_PUBLIC_LISTEN_THRESHOLD) || 0.9
 // How long a listening session lasts, in minutes of audio played (the track repeats until then).
 // When it is over the audio stops and the page moves on by itself. If the listening threshold
 // above has not been reached by then, the session keeps playing until it has.
-const SESSION_MINUTES = 1;
+const SESSION_MINUTES: number = 20;
 const SESSION_SECONDS = SESSION_MINUTES * 60;
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
