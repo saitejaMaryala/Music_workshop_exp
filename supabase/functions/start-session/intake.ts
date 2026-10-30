@@ -113,3 +113,42 @@ export function parseIntake(raw: unknown): Intake | null {
     lyricsDisturbSleep: lyrics as number,
   };
 }
+
+// Question text exactly as shown on the details page (app/study-app.tsx). Used as JSON keys.
+export const INTAKE_QUESTIONS = {
+  ageGroup: "Age group",
+  branch: "Branch",
+  currentYear: "Current year",
+  musicTraining: "Do you have formal training in music?",
+  usualBedTime: "What time do you usually go to sleep?",
+  sleepLatencyMinutes: "On a usual night, how many minutes does it take you to fall asleep?",
+  sleepQuality: "How would you rate your sleep over the last month? (1 = very bad, 5 = very good)",
+  sleepListening: "How often do you listen to music before sleep or while falling asleep?",
+  sleepGenres: "Which genre(s) do you typically listen to before or while sleeping?",
+  classicalFamiliarity: "How familiar are you with Indian classical music (Raagas / Taalas)?",
+  musicHelpsSleep: "Overall, do you believe music helps you fall asleep or sleep better?",
+  sleepRanking: "Rank these music styles from MOST to LEAST helpful for YOUR sleep (1 = most helpful)",
+  raagaEffect:
+    "Do you think Indian classical Raagas and Taalas have a distinct effect on relaxation or sleep compared to other music?",
+  lyricsDisturbSleep: "In general, how much do you believe lyrics (words in a song) disturb sleep? (1 = not at all, 7 = extremely)",
+} as const satisfies Record<keyof Intake, string>;
+
+// participants column -> the questions stored in it, in page order.
+const INTAKE_SECTIONS = {
+  about_you: ["ageGroup", "branch", "currentYear", "musicTraining"],
+  your_sleep: ["usualBedTime", "sleepLatencyMinutes", "sleepQuality"],
+  listening_habits: ["sleepListening", "sleepGenres", "classicalFamiliarity"],
+  beliefs_about_music_and_sleep: ["musicHelpsSleep", "sleepRanking", "raagaEffect", "lyricsDisturbSleep"],
+} as const satisfies Record<string, readonly (keyof Intake)[]>;
+
+export type IntakeSections = Record<keyof typeof INTAKE_SECTIONS, Record<string, unknown>>;
+
+// One JSON object per section: { "<question text>": <answer>, ... }.
+export function intakeSections(intake: Intake): IntakeSections {
+  return Object.fromEntries(
+    Object.entries(INTAKE_SECTIONS).map(([column, keys]) => [
+      column,
+      Object.fromEntries(keys.map((k) => [INTAKE_QUESTIONS[k], intake[k]])),
+    ]),
+  ) as IntakeSections;
+}

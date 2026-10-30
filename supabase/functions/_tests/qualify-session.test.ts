@@ -8,7 +8,6 @@ import {
   sessionById,
   setupTest,
 } from "./helpers.ts";
-import { rowsOf } from "./fake_supabase.ts";
 
 const DEVICE = "device-qualify";
 
@@ -93,10 +92,6 @@ Deno.test("qualify-session: queues the invitation and sets the release time", as
   assert.equal(saved?.listened_seconds, 170);
   assert.ok(saved?.qualified_at);
   assert.equal(saved?.release_at, response.body.releaseAt);
-
-  const events = rowsOf("playback_events").filter((event) => event.session_id === session.id);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].event_type, "sleepy");
 });
 
 Deno.test("qualify-session: stops at startup when SURVEY_DELAY_SECONDS is not a number", async () => {

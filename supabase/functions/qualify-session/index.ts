@@ -84,12 +84,5 @@ Deno.serve(async (request) => {
     return json({ error: "Could not save your progress. Please try again." }, 500);
   }
 
-  const { error: eventError } = await admin.from("playback_events").insert({
-    session_id: session.id,
-    event_type: "sleepy",
-    position_seconds: Math.floor(numListened),
-  });
-  if (eventError) logError("qualify-session: could not log sleepy event:", eventError.message);
-
   return json({ releaseAt });
 });

@@ -7,3 +7,4 @@ out/
 !.env.example
 supabase/.temp/
 CURRENT_CONTEXT.md
+session.txt

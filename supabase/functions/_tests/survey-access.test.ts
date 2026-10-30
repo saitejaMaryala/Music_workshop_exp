@@ -109,10 +109,13 @@ Deno.test("survey-access: saves one submission and marks the session submitted",
   assert.equal(response.status, 200);
   assert.deepEqual(response.body, { available: false, submitted: true });
   assert.equal(rowsOf("survey_responses").length, 1);
-  const saved = rowsOf("survey_responses")[0].answers as Record<string, unknown>;
-  assert.equal(saved.audioFeeling, "Relaxed");
-  assert.equal(saved.otherNotes, null, "a blank optional answer is stored as null");
-  assert.equal(saved.totalSleepMinutes, 430, "hours and minutes are stored as total minutes");
+  const saved = rowsOf("survey_responses")[0];
+  const words = saved.in_your_own_words as Record<string, unknown>;
+  const night = saved.your_night as Record<string, unknown>;
+  assert.equal(words["How did the audio make you feel while you were falling asleep?"], "Relaxed");
+  assert.equal(words["Anything else about your night? (optional)"], null, "a blank optional answer is stored as null");
+  assert.equal(night["Roughly how long did you sleep in total? (minutes)"], 430, "hours and minutes are stored as total minutes");
+  assert.deepEqual((saved.night_factors as Record<string, unknown>)["Yesterday or last night I had:"], ["None of these"]);
   assert.equal(session.status, "survey_submitted");
   assert.equal(participant.auth_user_id, "auth-user-1", "email match links the sign-in to the participant");
 });

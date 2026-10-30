@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, hash, json } from "../_shared/http.ts";
 import { logError } from "../_shared/log.ts";
-import { parseIntake } from "./intake.ts";
+import { intakeSections, parseIntake } from "./intake.ts";
 
 const admin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -110,7 +110,7 @@ Deno.serve(async (request) => {
       roll_number: normalizedRoll,
       display_name: String(displayName ?? "").trim() || null,
       from_workshop: fromWorkshop,
-      intake,
+      ...intakeSections(intake),
     })
     .select("id")
     .single();

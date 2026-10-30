@@ -3,7 +3,7 @@
 This folder holds the backend for the listening study:
 
 - 7 Edge Functions in `supabase/functions/`
-- 4 SQL migrations in `supabase/migrations/` (001 to 004)
+- 1 SQL migration in `supabase/migrations/` (`001_study_schema.sql`)
 - Resend for the survey email
 - Supabase Auth for the survey magic link and admin sign-in
 
@@ -35,16 +35,17 @@ Use placeholders in this guide. Replace each `<NAME>` with your own value. Never
 
 ---
 
-## 2. Run the migrations
+## 2. Run the migration
 
-Run the files in this order. Each file can be run again without harm.
+`001_study_schema.sql` creates everything: the tables (`participants`, `study_sessions`,
+`survey_responses`, `admin_users`), the session status type, row-level
+security, and the roll-number check used by the welcome page. It can be run again without harm,
+and it keeps an existing `admin_users` table.
 
-1. `001_study_schema.sql`: tables, enum types, and row-level security.
-2. `002_add_workshop_flag.sql`: workshop flag, `sending` status, and `email_attempts`.
-3. `003_resend_invitation.sql`: `resend_count` and `last_resend_at` for the resend limit.
-4. `004_email_reliability.sql`: `sending_started_at` and a queue index.
+The questionnaire and the morning survey are stored one JSON column per section, with the
+question text as the key and the answer as the value.
 
-**Option A, SQL editor:** open **SQL editor** in the dashboard. Paste each file and run it.
+**Option A, SQL editor:** open **SQL editor** in the dashboard. Paste the file and run it.
 
 **Option B, CLI:**
 

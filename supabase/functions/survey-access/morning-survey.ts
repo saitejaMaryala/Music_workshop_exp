@@ -110,3 +110,45 @@ export function parseMorningSurvey(raw: unknown): { survey: MorningSurvey } | { 
     },
   };
 }
+
+// Question text exactly as shown on the survey page (app/study-app.tsx). Used as JSON keys.
+export const SURVEY_QUESTIONS = {
+  bedTime: "What time did you get into bed and try to sleep?",
+  wakeTime: "What time did you wake up for the day?",
+  sleepLatencyMinutes: "Roughly how many minutes did it take you to fall asleep?",
+  awakenings: "How many times do you remember waking up during the night?",
+  totalSleepMinutes: "Roughly how long did you sleep in total? (minutes)",
+  sleepQuality: "How well did you sleep last night? (1 = very badly, 5 = very well)",
+  easeFallingAsleep: "How easy was it to fall asleep? (1 = very hard, 5 = very easy)",
+  restedNow: "How rested do you feel right now? (1 = not at all, 5 = fully rested)",
+  alertNow: "How awake and alert do you feel right now? (1 = very sleepy, 5 = very alert)",
+  audioPlayedFully: "Did the audio keep playing until you stopped the session?",
+  asleepBeforeAudioEnded: "Were you asleep before the audio ended?",
+  heardBefore: "Had you heard this music before?",
+  likedMusic: "How much did you like it? (1 = not at all, 5 = loved it)",
+  volume: "Was the volume comfortable?",
+  factors: "Yesterday or last night I had:",
+  audioFeeling: "How did the audio make you feel while you were falling asleep?",
+  otherNotes: "Anything else about your night? (optional)",
+} as const satisfies Record<keyof MorningSurvey, string>;
+
+// survey_responses column -> the questions stored in it, in page order.
+const SURVEY_SECTIONS = {
+  your_night: ["bedTime", "wakeTime", "sleepLatencyMinutes", "awakenings", "totalSleepMinutes"],
+  how_it_felt: ["sleepQuality", "easeFallingAsleep", "restedNow", "alertNow"],
+  the_audio: ["audioPlayedFully", "asleepBeforeAudioEnded", "heardBefore", "likedMusic", "volume"],
+  night_factors: ["factors"],
+  in_your_own_words: ["audioFeeling", "otherNotes"],
+} as const satisfies Record<string, readonly (keyof MorningSurvey)[]>;
+
+export type SurveySections = Record<keyof typeof SURVEY_SECTIONS, Record<string, unknown>>;
+
+// One JSON object per section: { "<question text>": <answer>, ... }.
+export function surveySections(survey: MorningSurvey): SurveySections {
+  return Object.fromEntries(
+    Object.entries(SURVEY_SECTIONS).map(([column, keys]) => [
+      column,
+      Object.fromEntries(keys.map((k) => [SURVEY_QUESTIONS[k], survey[k]])),
+    ]),
+  ) as SurveySections;
+}

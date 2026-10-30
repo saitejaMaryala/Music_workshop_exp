@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, getBearer, json } from "../_shared/http.ts";
 import { logError } from "../_shared/log.ts";
-import { parseMorningSurvey } from "./morning-survey.ts";
+import { parseMorningSurvey, surveySections } from "./morning-survey.ts";
 
 const admin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -117,7 +117,7 @@ Deno.serve(async (request) => {
     .insert({
       session_id: session.id,
       participant_id: participant.id,
-      answers: parsed.survey,
+      ...surveySections(parsed.survey),
     });
 
   if (insertError) {
