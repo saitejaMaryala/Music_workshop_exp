@@ -36,6 +36,7 @@ type Screen =
   | "loading"       // checking localStorage for a returning device token
   | "welcome"       // study intro + consent
   | "details"       // registration form
+  | "volume"        // sample audio to set a comfortable volume, then registration
   | "listen"        // audio player
   | "waiting"       // post-qualification, pre-email
   | "survey"        // reflection form (after magic link or device return)
@@ -57,6 +58,9 @@ type ParticipantState = {
 // ---------------------------------------------------------------------------
 const AUDIO_BASE_URL = process.env.NEXT_PUBLIC_AUDIO_BASE_URL ?? "";
 
+// Played on a loop on the volume screen, before the session starts.
+const VOLUME_SAMPLE_FILENAME = "volume_adjusting_music.mp3";
+
 // Condition metadata — filenames and loop fractions.
 const CONDITION_METADATA: Record<string, { filename: string; loopStartFraction: number }> = {
   "condition-a": { filename: "wholetones.mpeg", loopStartFraction: 27 / 46 },
@@ -73,6 +77,14 @@ const LISTEN_THRESHOLD = Number(process.env.NEXT_PUBLIC_LISTEN_THRESHOLD) || 0.9
 // above has not been reached by then, the session keeps playing until it has.
 const SESSION_MINUTES: number = 20;
 const SESSION_SECONDS = SESSION_MINUTES * 60;
+
+// DEBUG MODE — local development only. Set NEXT_PUBLIC_DEBUG=true in .env.local (never in the
+// GitHub build). Shows a panel to jump between screens, lets the buttons skip required fields,
+// and never calls Supabase: sessions, qualification and survey submission are all faked locally.
+const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
+// Real track lengths in seconds (must match DURATION_CONDITION_A/B), used for fake debug sessions.
+const DEBUG_DURATIONS: Record<string, number> = { "condition-a": 643, "condition-b": 602 };
+const DEBUG_SCREENS: Screen[] = ["welcome", "details", "volume", "waiting", "survey", "complete", "already_registered", "science"];
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -373,6 +385,10 @@ export function StudyApp() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [playedSeconds, setPlayedSeconds] = useState(0);
+  // Volume screen sample.
+  const volumeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [volumePlaying, setVolumePlaying] = useState(false);
+  const [volumeError, setVolumeError] = useState<string | null>(null);
   const [isLooping, setIsLooping] = useState(false);
   const [loopCount, setLoopCount] = useState(0);
   const [audioError, setAudioError] = useState<string | null>(null);
@@ -571,6 +587,32 @@ export function StudyApp() {
     });
   }
 
+  // Volume screen: start the sample on a loop. Called from a click so browsers allow sound.
+  function playVolumeSample() {
+    let audio = volumeAudioRef.current;
+    if (!audio) {
+      audio = new Audio(`${AUDIO_BASE_URL}/${VOLUME_SAMPLE_FILENAME}`);
+      audio.loop = true;
+      audio.addEventListener("play", () => setVolumePlaying(true));
+      audio.addEventListener("pause", () => setVolumePlaying(false));
+      audio.addEventListener("error", () => {
+        if (!audio?.getAttribute("src")) return;
+        setVolumeError("Could not load the sample audio. You can still continue.");
+      });
+      volumeAudioRef.current = audio;
+    }
+    setVolumeError(null);
+    audio.play().catch(() => setVolumePlaying(false));
+  }
+
+  // Stop the sample whenever the volume screen is left.
+  useEffect(() => {
+    if (screen === "volume") return;
+    releaseAudio(volumeAudioRef.current);
+    volumeAudioRef.current = null;
+    setVolumePlaying(false);
+  }, [screen]);
+
   // Audio callbacks read the participant from a ref, since they outlive the render that made them.
   useEffect(() => {
     participantRef.current = participant;
@@ -588,6 +630,11 @@ export function StudyApp() {
   // -------------------------------------------------------------------------
   // Welcome page: stop early if this roll number has already taken part.
   async function checkRollNumber() {
+    if (DEBUG) {
+      setError(null);
+      setScreen("details");
+      return;
+    }
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       setError("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
       return;
@@ -621,7 +668,29 @@ export function StudyApp() {
     }
   }
 
+  // Debug only: a local session with no server row. Nothing is saved.
+  function startDebugSession(conditionId: string) {
+    const p: ParticipantState = {
+      deviceToken: "debug",
+      conditionId,
+      durationSeconds: DEBUG_DURATIONS[conditionId] ?? 180,
+    };
+    setParticipant(p);
+    participantRef.current = p;
+    setupAudio(p.conditionId, p.durationSeconds);
+    setElapsed(0);
+    setLoopCount(0);
+    setIsLooping(false);
+    setPlayedSeconds(0);
+    setError(null);
+    setScreen("listen");
+  }
+
   async function beginStudy() {
+    if (DEBUG) {
+      startDebugSession("condition-a");
+      return;
+    }
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       setError("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
       return;
@@ -683,6 +752,12 @@ export function StudyApp() {
     const q = qualifyRef.current;
     const p = participantRef.current;
     if (q.done || q.inFlight || Date.now() - q.lastAttempt < 10_000) return;
+    if (DEBUG) {
+      q.done = true;
+      setReleaseAt(new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString());
+      if (playedSecondsRef.current >= SESSION_SECONDS) finishSession();
+      return;
+    }
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !p) {
       q.done = true; // nothing to tell (Supabase not configured)
       return;
@@ -738,6 +813,10 @@ export function StudyApp() {
   // The server always sends to the email saved at registration, and only after the wait time.
   // -------------------------------------------------------------------------
   async function resendInvitation(mode: "device" | "details") {
+    if (DEBUG) {
+      setResendNotice({ kind: "info", text: "Debug mode: no email was sent." });
+      return;
+    }
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       setResendNotice({ kind: "error", text: "Supabase is not configured." });
       return;
@@ -810,6 +889,10 @@ export function StudyApp() {
   // -------------------------------------------------------------------------
   async function submitSurvey(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (DEBUG) {
+      setScreen("complete");
+      return;
+    }
     if (!allRatingsComplete) return;
     setBusy(true);
     setError(null);
@@ -913,7 +996,7 @@ export function StudyApp() {
           {error && <p className="error-message" role="alert">{error}</p>}
           <button
             className="button primary"
-            disabled={!consented || rollNumber.trim() === "" || busy}
+            disabled={!DEBUG && (!consented || rollNumber.trim() === "" || busy)}
             onClick={checkRollNumber}
             type="button"
           >
@@ -1112,12 +1195,48 @@ export function StudyApp() {
           )}
           <button
             className="button primary"
-            disabled={!canBegin}
-            onClick={beginStudy}
+            disabled={!DEBUG && !canBegin}
+            onClick={() => {
+              setError(null);
+              setScreen("volume");
+              playVolumeSample();
+            }}
             type="button"
           >
-            {busy ? "Starting…" : <>Begin listening <span aria-hidden="true">→</span></>}
+            Continue <span aria-hidden="true">→</span>
           </button>
+        </section>
+      )}
+
+      {/* Volume check */}
+      {screen === "volume" && (
+        <section className="player-screen screen" aria-live="polite">
+          <button className="back" onClick={() => setScreen("details")} type="button">← Back</button>
+          <div className={volumePlaying ? "orb playing" : "orb"} aria-hidden="true">
+            <i /><i /><i /><i /><i />
+          </div>
+          <p className="eyebrow">Before you begin</p>
+          <h1>Set your volume.</h1>
+          <p className="player-copy">
+            Put on your headphones if you have them. Adjust your volume until this sound feels
+            comfortable for falling asleep, then press Next.
+          </p>
+          {volumeError && <p className="error-message" role="alert">{volumeError}</p>}
+          <div className="player-actions">
+            {volumePlaying ? (
+              <button className="play-button" onClick={() => volumeAudioRef.current?.pause()} type="button">
+                <span aria-hidden="true">❚❚</span>Pause sample
+              </button>
+            ) : (
+              <button className="play-button" onClick={playVolumeSample} type="button">
+                <span aria-hidden="true">▶</span>Play sample
+              </button>
+            )}
+            <button className="button primary" disabled={busy} onClick={beginStudy} type="button">
+              {busy ? "Starting…" : <>Next <span aria-hidden="true">→</span></>}
+            </button>
+          </div>
+          {error && <p className="error-message" role="alert">{error}</p>}
         </section>
       )}
 
@@ -1185,7 +1304,12 @@ export function StudyApp() {
               </button>
             )}
             {isPlaying && (
-              <span className="listening-indicator">Listening in progress</span>
+              <>
+                <span className="listening-indicator">Listening in progress</span>
+                <button className="play-button" onClick={() => audioRef.current?.pause()} type="button">
+                  <span aria-hidden="true">❚❚</span>Pause
+                </button>
+              </>
             )}
             {process.env.NEXT_PUBLIC_ENABLE_TEST_MODE === "1" && isTestMode && !isLooping && (
               <button
@@ -1398,19 +1522,19 @@ export function StudyApp() {
             </section>
 
             <section className="form-card survey-part background-card">
-              <h2>5 · Optional</h2>
+              <h2>5 · In your own words</h2>
               <label>
                 How did the audio make you feel while you were falling asleep?
                 <textarea
                   maxLength={MAX_TEXT_CHARACTERS}
                   onChange={(e) => updateSurvey({ audioFeeling: e.target.value })}
-                  placeholder="Optional"
+                  placeholder="A sentence or two is fine"
                   rows={3}
                   value={survey.audioFeeling}
                 />
               </label>
               <label>
-                Anything else about your night?
+                Anything else about your night? (optional)
                 <textarea
                   maxLength={MAX_TEXT_CHARACTERS}
                   onChange={(e) => updateSurvey({ otherNotes: e.target.value })}
@@ -1421,12 +1545,12 @@ export function StudyApp() {
               </label>
             </section>
             {!allRatingsComplete && !busy && (
-              <p className="microcopy">Answer every question in parts 1–4 to submit.</p>
+              <p className="microcopy">Answer every question to submit (only the last one is optional).</p>
             )}
             {error && <p className="error-message" role="alert">{error}</p>}
             <button
               className="button primary"
-              disabled={!allRatingsComplete || busy}
+              disabled={!DEBUG && (!allRatingsComplete || busy)}
               type="submit"
             >
               {busy ? "Submitting…" : <>Complete reflection <span aria-hidden="true">→</span></>}
@@ -1480,6 +1604,63 @@ export function StudyApp() {
             </p>
           </div>
         </section>
+      )}
+
+      {DEBUG && (
+        <aside className="debug-panel" aria-label="Debug panel">
+          <strong>Debug · {screen}</strong>
+          <div>
+            {DEBUG_SCREENS.map((target) => (
+              <button
+                key={target}
+                onClick={() => {
+                  releaseAudio(audioRef.current);
+                  setIsPlaying(false);
+                  setError(null);
+                  if (target === "waiting" && !releaseAt) {
+                    setReleaseAt(new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString());
+                  }
+                  setScreen(target);
+                }}
+                type="button"
+              >
+                {target}
+              </button>
+            ))}
+            <button onClick={() => startDebugSession("condition-a")} type="button">listen A</button>
+            <button onClick={() => startDebugSession("condition-b")} type="button">listen B</button>
+          </div>
+          {screen === "listen" && (
+            <div>
+              <button
+                onClick={() => {
+                  const audio = audioRef.current;
+                  if (!audio) return;
+                  // Counts as played time, so the 20-minute end can be tested quickly.
+                  playedSecondsRef.current += 60;
+                  maxListenedSecondsRef.current = Math.max(
+                    maxListenedSecondsRef.current,
+                    Math.floor(audio.currentTime + 60),
+                  );
+                  audio.currentTime = Math.min(audio.currentTime + 60, Math.max(audio.duration - 1, 0) || 0);
+                }}
+                type="button"
+              >
+                +1 min
+              </button>
+              <button
+                onClick={() => {
+                  qualifyRef.current.done = true;
+                  setReleaseAt(new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString());
+                  finishSession();
+                }}
+                type="button"
+              >
+                end session
+              </button>
+            </div>
+          )}
+        </aside>
       )}
     </main>
   );

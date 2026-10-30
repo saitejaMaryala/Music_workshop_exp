@@ -45,8 +45,8 @@ const validAnswers = {
   likedMusic: 5,
   volume: "Just right",
   factors: ["None of these"],
-  audioFeeling: "",
-  otherNotes: "Felt calm",
+  audioFeeling: "Relaxed",
+  otherNotes: "",
 };
 
 const validSubmission = { action: "submit", answers: validAnswers };
@@ -110,8 +110,8 @@ Deno.test("survey-access: saves one submission and marks the session submitted",
   assert.deepEqual(response.body, { available: false, submitted: true });
   assert.equal(rowsOf("survey_responses").length, 1);
   const saved = rowsOf("survey_responses")[0].answers as Record<string, unknown>;
-  assert.equal(saved.otherNotes, "Felt calm");
-  assert.equal(saved.audioFeeling, null, "blank optional answers are stored as null");
+  assert.equal(saved.audioFeeling, "Relaxed");
+  assert.equal(saved.otherNotes, null, "a blank optional answer is stored as null");
   assert.equal(saved.totalSleepMinutes, 430, "hours and minutes are stored as total minutes");
   assert.equal(session.status, "survey_submitted");
   assert.equal(participant.auth_user_id, "auth-user-1", "email match links the sign-in to the participant");
@@ -146,6 +146,7 @@ Deno.test("survey-access: rejects invalid answers and written answers over 2000 
   assert.equal((await submit({ factors: [] })).status, 400);
   assert.equal((await submit({ factors: ["None of these", "Alcohol"] })).status, 400);
   assert.equal((await submit({ otherNotes: "x".repeat(2001) })).status, 400);
+  assert.equal((await submit({ audioFeeling: "   " })).status, 400, "the audio-feeling answer is required");
   assert.equal((await callFunction(handler, { action: "submit" }, AUTH_HEADERS)).status, 400);
   assert.equal(rowsOf("survey_responses").length, 0);
 });

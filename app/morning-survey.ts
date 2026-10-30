@@ -39,7 +39,7 @@ export type MorningSurvey = {
   volume: string;
   // Part 4 — tick all that apply.
   factors: string[];
-  // Part 5 — optional.
+  // Part 5 — in your own words. audioFeeling is required, otherNotes is optional.
   audioFeeling: string;
   otherNotes: string;
 };
@@ -88,6 +88,7 @@ export function isMorningSurveyComplete(s: MorningSurvey) {
     s.likedMusic !== null &&
     s.volume !== "" &&
     s.factors.length > 0 &&
+    s.audioFeeling.trim() !== "" &&
     Array.from(s.audioFeeling).length <= MAX_TEXT_CHARACTERS &&
     Array.from(s.otherNotes).length <= MAX_TEXT_CHARACTERS
   );

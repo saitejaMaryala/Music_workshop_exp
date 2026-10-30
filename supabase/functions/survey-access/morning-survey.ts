@@ -34,7 +34,7 @@ export type MorningSurvey = {
   likedMusic: number;
   volume: string;
   factors: string[];
-  audioFeeling: string | null;
+  audioFeeling: string;
   otherNotes: string | null;
 };
 
@@ -83,6 +83,7 @@ export function parseMorningSurvey(raw: unknown): { survey: MorningSurvey } | { 
 
   const audioFeeling = optionalText(r.audioFeeling);
   const otherNotes = optionalText(r.otherNotes);
+  if (!audioFeeling) return { error: "Tell us how the audio made you feel while you were falling asleep." };
   if (Array.from(audioFeeling).length > MAX_TEXT_CHARACTERS || Array.from(otherNotes).length > MAX_TEXT_CHARACTERS) {
     return { error: `Written answers must be ${MAX_TEXT_CHARACTERS} characters or fewer.` };
   }
@@ -104,7 +105,7 @@ export function parseMorningSurvey(raw: unknown): { survey: MorningSurvey } | { 
       likedMusic,
       volume: r.volume as string,
       factors: [...new Set(factors as string[])],
-      audioFeeling: audioFeeling || null,
+      audioFeeling,
       otherNotes: otherNotes || null,
     },
   };
