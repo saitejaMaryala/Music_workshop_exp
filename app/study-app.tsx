@@ -812,6 +812,54 @@ export function StudyApp() {
   // "details": already-registered screen, identified by the email / roll number typed.
   // The server always sends to the email saved at registration, and only after the wait time.
   // -------------------------------------------------------------------------
+  // Registered but never finished listening, now on another device: carry on with the same session.
+  async function resumeSession() {
+    if (DEBUG) {
+      setResendNotice({ kind: "info", text: "Debug mode: nothing to resume." });
+      return;
+    }
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      setResendNotice({ kind: "error", text: "Supabase is not configured." });
+      return;
+    }
+    setResendBusy(true);
+    setResendNotice(null);
+    try {
+      const r = await fetch(apiUrl("resume-session"), {
+        method: "POST",
+        headers: apiHeaders(),
+        body: JSON.stringify({ rollNumber: rollNumber.trim() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.status === "resumed") {
+        const p: ParticipantState = {
+          deviceToken: data.deviceToken,
+          conditionId: data.conditionId,
+          durationSeconds: data.durationSeconds,
+        };
+        setParticipant(p);
+        saveDeviceToken(data.deviceToken);
+        setupAudio(data.conditionId, data.durationSeconds);
+        setElapsed(0);
+        setLoopCount(0);
+        setIsLooping(false);
+        setPlayedSeconds(0);
+        setScreen("listen");
+      } else if (data.status === "not_resumable") {
+        setResendNotice({
+          kind: "info",
+          text: "There is no unfinished listening session for this roll number. If you already listened, use the link sent to your email.",
+        });
+      } else {
+        setResendNotice({ kind: "error", text: data.error ?? "Could not resume your session. Please try again." });
+      }
+    } catch {
+      setResendNotice({ kind: "error", text: "Network error. Please check your connection." });
+    } finally {
+      setResendBusy(false);
+    }
+  }
+
   async function resendInvitation(mode: "device" | "details") {
     if (DEBUG) {
       setResendNotice({ kind: "info", text: "Debug mode: no email was sent." });
@@ -1250,15 +1298,18 @@ export function StudyApp() {
             This roll number is already registered, and each person can take part only once.
             If you haven&apos;t filled in the morning reflection yet, use the link sent to your email.
           </p>
+          <button className="button primary" disabled={resendBusy} onClick={resumeSession} type="button">
+            {resendBusy ? "Please wait…" : "I haven't finished listening — continue"}
+          </button>
           <button className="button primary" disabled={resendBusy} onClick={() => resendInvitation("details")} type="button">
-            {resendBusy ? "Sending…" : "Didn't get the email? Resend it"}
+            {resendBusy ? "Please wait…" : "Didn't get the email? Resend it"}
           </button>
           {resendNotice && (
             <p className={resendNotice.kind === "error" ? "error-message" : "microcopy"} role="status">
               {resendNotice.text}
             </p>
           )}
-          <p className="microcopy">The link goes to the email address you registered with.</p>
+          <p className="microcopy">The link goes to the email address you registered with. Continuing on this device stops the earlier device from working.</p>
         </section>
       )}
 
