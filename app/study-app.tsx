@@ -1415,31 +1415,6 @@ export function StudyApp() {
                   <span>times</span>
                 </span>
               </label>
-              <fieldset className="intake-question">
-                <legend>Roughly how long did you sleep in total?</legend>
-                <div className="unit-row">
-                  <span className="unit-input">
-                    <input
-                      aria-label="Hours slept"
-                      inputMode="numeric"
-                      onChange={(e) => updateSurvey({ totalSleepHours: e.target.value.replace(/\D/g, "") })}
-                      placeholder="7"
-                      value={survey.totalSleepHours}
-                    />
-                    <span>h</span>
-                  </span>
-                  <span className="unit-input">
-                    <input
-                      aria-label="Extra minutes slept"
-                      inputMode="numeric"
-                      onChange={(e) => updateSurvey({ totalSleepMinutes: e.target.value.replace(/\D/g, "") })}
-                      placeholder="30"
-                      value={survey.totalSleepMinutes}
-                    />
-                    <span>min</span>
-                  </span>
-                </div>
-              </fieldset>
             </section>
 
             <section className="form-card survey-part">

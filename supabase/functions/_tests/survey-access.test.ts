@@ -33,8 +33,6 @@ const validAnswers = {
   wakeTime: "07:15",
   sleepLatencyMinutes: "20",
   awakenings: "1",
-  totalSleepHours: "7",
-  totalSleepMinutes: "10",
   sleepQuality: 4,
   easeFallingAsleep: 3,
   restedNow: 4,
@@ -114,7 +112,7 @@ Deno.test("survey-access: saves one submission and marks the session submitted",
   const night = saved.your_night as Record<string, unknown>;
   assert.equal(words["How did the audio make you feel while you were falling asleep?"], "Relaxed");
   assert.equal(words["Anything else about your night? (optional)"], null, "a blank optional answer is stored as null");
-  assert.equal(night["Roughly how long did you sleep in total? (minutes)"], 430, "hours and minutes are stored as total minutes");
+  assert.equal(night["Roughly how long did you sleep in total? (minutes)"], 445, "total sleep is calculated: 23:30 to 07:15 is 465 min, minus 20 min to fall asleep");
   assert.deepEqual((saved.night_factors as Record<string, unknown>)["Yesterday or last night I had:"], ["None of these"]);
   assert.equal(session.status, "survey_submitted");
   assert.equal(participant.auth_user_id, "auth-user-1", "email match links the sign-in to the participant");

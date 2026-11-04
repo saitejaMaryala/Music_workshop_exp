@@ -38,6 +38,13 @@ export type MorningSurvey = {
   otherNotes: string | null;
 };
 
+// Not asked on the survey: wake time - (bed time + minutes to fall asleep), across midnight if needed.
+export function estimateSleepMinutes(bedTime: string, wakeTime: string, latencyMinutes: number): number {
+  const toMinutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const inBed = (toMinutes(wakeTime) - toMinutes(bedTime) + 1440) % 1440;
+  return Math.max(0, inBed - latencyMinutes);
+}
+
 // Returns a clean copy of the answers, or an error message for the participant.
 export function parseMorningSurvey(raw: unknown): { survey: MorningSurvey } | { error: string } {
   if (!raw || typeof raw !== "object") return { error: "Please answer every question." };
@@ -56,9 +63,7 @@ export function parseMorningSurvey(raw: unknown): { survey: MorningSurvey } | { 
 
   const latency = whole(r.sleepLatencyMinutes, 300);
   const awakenings = whole(r.awakenings, 50);
-  const hours = whole(r.totalSleepHours, 24);
-  const minutes = r.totalSleepMinutes === "" || r.totalSleepMinutes === undefined ? 0 : whole(r.totalSleepMinutes, 59);
-  if (latency === null || awakenings === null || hours === null || minutes === null) {
+  if (latency === null || awakenings === null) {
     return { error: "Enter whole numbers for the questions about your night." };
   }
 
@@ -94,7 +99,7 @@ export function parseMorningSurvey(raw: unknown): { survey: MorningSurvey } | { 
       wakeTime: r.wakeTime as string,
       sleepLatencyMinutes: latency,
       awakenings,
-      totalSleepMinutes: hours * 60 + minutes,
+      totalSleepMinutes: estimateSleepMinutes(r.bedTime as string, r.wakeTime as string, latency),
       sleepQuality,
       easeFallingAsleep,
       restedNow,

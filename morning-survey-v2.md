@@ -6,7 +6,6 @@
 2. What time did you wake up for the day? ____ : ____
 3. Roughly how many minutes did it take you to fall asleep? ____ min
 4. How many times do you remember waking up during the night? ____ (0 if none)
-5. Roughly how long did you sleep in total? ____ h ____ min
 
 ## Part 2. How it felt (circle one)
 

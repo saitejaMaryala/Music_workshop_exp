@@ -8,3 +8,5 @@ out/
 supabase/.temp/
 CURRENT_CONTEXT.md
 session.txt
+
+*.tsbuildinfo

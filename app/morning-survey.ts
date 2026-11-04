@@ -24,8 +24,6 @@ export type MorningSurvey = {
   wakeTime: string;
   sleepLatencyMinutes: string;
   awakenings: string;
-  totalSleepHours: string;
-  totalSleepMinutes: string;
   // Part 2 — 1 to 5.
   sleepQuality: number | null;
   easeFallingAsleep: number | null;
@@ -49,8 +47,6 @@ export const initialMorningSurvey: MorningSurvey = {
   wakeTime: "",
   sleepLatencyMinutes: "",
   awakenings: "",
-  totalSleepHours: "",
-  totalSleepMinutes: "",
   sleepQuality: null,
   easeFallingAsleep: null,
   restedNow: null,
@@ -76,8 +72,6 @@ export function isMorningSurveyComplete(s: MorningSurvey) {
     isTime(s.wakeTime) &&
     isWholeNumber(s.sleepLatencyMinutes, 300) &&
     isWholeNumber(s.awakenings, 50) &&
-    isWholeNumber(s.totalSleepHours, 24) &&
-    (s.totalSleepMinutes === "" || isWholeNumber(s.totalSleepMinutes, 59)) &&
     s.sleepQuality !== null &&
     s.easeFallingAsleep !== null &&
     s.restedNow !== null &&
