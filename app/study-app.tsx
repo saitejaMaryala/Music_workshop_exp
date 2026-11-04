@@ -1298,12 +1298,14 @@ export function StudyApp() {
             This roll number is already registered, and each person can take part only once.
             If you haven&apos;t filled in the morning reflection yet, use the link sent to your email.
           </p>
-          <button className="button primary" disabled={resendBusy} onClick={resumeSession} type="button">
-            {resendBusy ? "Please wait…" : "I haven't finished listening — continue"}
-          </button>
-          <button className="button primary" disabled={resendBusy} onClick={() => resendInvitation("details")} type="button">
-            {resendBusy ? "Please wait…" : "Didn't get the email? Resend it"}
-          </button>
+          <div className="button-row">
+            <button className="button primary" disabled={resendBusy} onClick={resumeSession} type="button">
+              {resendBusy ? "Please wait…" : "I haven't finished listening — continue"}
+            </button>
+            <button className="button primary" disabled={resendBusy} onClick={() => resendInvitation("details")} type="button">
+              {resendBusy ? "Please wait…" : "Didn't get the email? Resend it"}
+            </button>
+          </div>
           {resendNotice && (
             <p className={resendNotice.kind === "error" ? "error-message" : "microcopy"} role="status">
               {resendNotice.text}

@@ -127,3 +127,5 @@ h1, .intro, .player-copy, .science-copy { overflow-wrap:anywhere; }
 .debug-panel div { display:flex; flex-wrap:wrap; gap:6px; }
 .debug-panel button { border:1px solid #f0c27b; border-radius:6px; background:#fff; color:#78350f; padding:4px 8px; font-family:inherit; font-size:11px; cursor:pointer; }
 .debug-panel button:hover { background:#fef3c7; }
+
+.button-row { display:flex; flex-wrap:wrap; justify-content:center; gap:14px; }
