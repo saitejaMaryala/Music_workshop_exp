@@ -458,22 +458,19 @@ export function StudyApp() {
         .then((r) => r.json())
         .then((data) => {
           if (data.state) {
-            const p: ParticipantState = {
-              deviceToken: storedToken,
-              conditionId: data.conditionId ?? "",
-              durationSeconds: data.durationSeconds ?? 0,
-            };
-            setParticipant(p);
-            if (typeof data.releaseAt === "string") setReleaseAt(data.releaseAt);
             if (data.state === "listening") {
+              // Mid-listening: carry on where they were.
+              const p: ParticipantState = {
+                deviceToken: storedToken,
+                conditionId: data.conditionId ?? "",
+                durationSeconds: data.durationSeconds ?? 0,
+              };
+              setParticipant(p);
               setScreen("listen");
-            } else if (data.state === "waiting") {
-              setScreen("waiting");
-            } else if (data.state === "ready_needs_login") {
-              // Show waiting with a note that the email was sent.
-              setScreen("waiting");
             } else {
-              // complete or unknown — clear token and show welcome.
+              // Finished listening (waiting for the email, email sent, or done): reset the stored token and
+              // start from the first page. They enter their roll number there and reach the
+              // "Already registered" page, which can open the survey.
               clearDeviceToken();
               setScreen("welcome");
             }
