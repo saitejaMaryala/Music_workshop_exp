@@ -129,3 +129,5 @@ h1, .intro, .player-copy, .science-copy { overflow-wrap:anywhere; }
 .debug-panel button:hover { background:#fef3c7; }
 
 .button-row { display:flex; flex-wrap:wrap; justify-content:center; gap:14px; }
+.button[aria-disabled="true"] { opacity:.42; cursor:not-allowed; }
+.button[aria-disabled="true"]:hover { transform:none; }

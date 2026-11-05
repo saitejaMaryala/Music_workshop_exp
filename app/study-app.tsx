@@ -410,6 +410,9 @@ export function StudyApp() {
   const [now, setNow] = useState(() => Date.now());
   const [resendBusy, setResendBusy] = useState(false);
   const [resendNotice, setResendNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
+  // Where a returning, already-registered person is up to (from the open-survey function).
+  const [regStatus, setRegStatus] = useState<string | null>(null);
+  const [regReleaseAt, setRegReleaseAt] = useState<string | null>(null);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -485,6 +488,30 @@ export function StudyApp() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // On the "Already registered" screen, ask the server how far this roll number got, so each button
+  // can say whether it applies.
+  useEffect(() => {
+    if (screen !== "already_registered") return;
+    setRegStatus(null);
+    setRegReleaseAt(null);
+    if (DEBUG || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+    let cancelled = false;
+    fetch(apiUrl("open-survey"), {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify({ rollNumber: rollNumber.trim(), action: "check" }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled || typeof data.status !== "string") return;
+        setRegStatus(data.status);
+        setRegReleaseAt(typeof data.releaseAt === "string" ? data.releaseAt : null);
+      })
+      .catch(() => { /* buttons stay usable; the server answers on click */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
 
   // -------------------------------------------------------------------------
   // Survey access check (magic link path)
@@ -812,10 +839,84 @@ export function StudyApp() {
   // "details": already-registered screen, identified by the email / roll number typed.
   // The server always sends to the email saved at registration, and only after the wait time.
   // -------------------------------------------------------------------------
+  // Why the survey cannot be opened yet, for each status other than "email_sent".
+  function surveyBlockedMessage(status: string, releaseAt: string | null) {
+    const when = releaseAt
+      ? `${new Date(releaseAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata", hour12: true })} IST`
+      : "the release time";
+    switch (status) {
+      case "listening":
+        return "You haven't finished listening yet, so the survey isn't open. Use “I haven't finished listening — continue” first.";
+      case "queued":
+        return `Your survey isn't ready yet. You will be able to open it after ${when}.`;
+      case "sending":
+        return "Your survey is being prepared right now. Please try again in a minute.";
+      case "submitted":
+        return "You have already completed the survey. Thank you!";
+      case "not_found":
+        return "We couldn't find a session for this roll number.";
+      default:
+        return "The survey isn't available yet.";
+    }
+  }
+
+  // Opens the survey straight from the roll number, for people whose email never arrived.
+  async function openSurveyFromRoll() {
+    if (resendBusy) return;
+    if (DEBUG) {
+      setResendNotice({ kind: "info", text: "Debug mode: no survey to open." });
+      return;
+    }
+    if (regStatus && regStatus !== "email_sent") {
+      setResendNotice({ kind: "error", text: surveyBlockedMessage(regStatus, regReleaseAt) });
+      return;
+    }
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      setResendNotice({ kind: "error", text: "Supabase is not configured." });
+      return;
+    }
+    setResendBusy(true);
+    setResendNotice(null);
+    try {
+      const r = await fetch(apiUrl("open-survey"), {
+        method: "POST",
+        headers: apiHeaders(),
+        body: JSON.stringify({ rollNumber: rollNumber.trim(), action: "open" }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.status === "ready" && typeof data.link === "string") {
+        // The link signs them in and comes back here with the survey unlocked, the same as the email link.
+        window.location.href = data.link;
+        return;
+      }
+      if (typeof data.status === "string" && data.status !== "error") {
+        setRegStatus(data.status);
+        setResendNotice({ kind: "error", text: surveyBlockedMessage(data.status, data.releaseAt ?? null) });
+      } else {
+        setResendNotice({ kind: "error", text: data.error ?? "Could not open the survey. Please try again." });
+      }
+    } catch {
+      setResendNotice({ kind: "error", text: "Network error. Please check your connection." });
+    } finally {
+      setResendBusy(false);
+    }
+  }
+
   // Registered but never finished listening, now on another device: carry on with the same session.
   async function resumeSession() {
+    if (resendBusy) return;
     if (DEBUG) {
       setResendNotice({ kind: "info", text: "Debug mode: nothing to resume." });
+      return;
+    }
+    if (regStatus && regStatus !== "listening") {
+      setResendNotice({
+        kind: "error",
+        text:
+          regStatus === "submitted"
+            ? "You have already completed the survey. Thank you!"
+            : "You have already finished listening, so there is nothing to continue. Use “Open my survey” when your survey is ready.",
+      });
       return;
     }
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
@@ -1299,8 +1400,21 @@ export function StudyApp() {
             If you haven&apos;t filled in the morning reflection yet, use the link sent to your email.
           </p>
           <div className="button-row">
-            <button className="button primary" disabled={resendBusy} onClick={resumeSession} type="button">
+            <button
+              aria-disabled={resendBusy || (regStatus !== null && regStatus !== "listening")}
+              className="button primary"
+              onClick={resumeSession}
+              type="button"
+            >
               {resendBusy ? "Please wait…" : "I haven't finished listening — continue"}
+            </button>
+            <button
+              aria-disabled={resendBusy || (regStatus !== null && regStatus !== "email_sent")}
+              className="button primary"
+              onClick={openSurveyFromRoll}
+              type="button"
+            >
+              {resendBusy ? "Please wait…" : "Open my survey"}
             </button>
             <button className="button primary" disabled={resendBusy} onClick={() => resendInvitation("details")} type="button">
               {resendBusy ? "Please wait…" : "Didn't get the email? Resend it"}

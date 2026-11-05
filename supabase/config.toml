@@ -21,3 +21,6 @@ verify_jwt = false
 
 [functions.resume-session]
 verify_jwt = false
+
+[functions.open-survey]
+verify_jwt = false
